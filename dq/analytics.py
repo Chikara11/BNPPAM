@@ -8,11 +8,13 @@ import pandas as pd
 from dq.config import COLUMN_TYPES, INPUT_FILES, SEVERITIES
 from dq.context import Context
 from dq.loaders import InputData, empty_rows, parse_issues_of, truly_missing
-from dq.schema import (COMPUTED, CONFLICTING_PRICES, DATA_QUALITY_COLUMNS, INVALID_ISIN,
+from dq.schema import (COMPUTED, CONFLICTING_PRICES, DATA_QUALITY_COLUMNS,
+                       DIMENSION_QUALITY_COLUMNS, INVALID_ISIN,
                        INVALID_MARKET_PRICE, INVALID_PREVIOUS_PRICE, MISSING_ISIN,
                        MISSING_MARKET_PRICE, MISSING_PREVIOUS_PRICE, NO_PORTFOLIO,
                        NO_PRICE_HISTORY, NO_USABLE_PRICE, PRICE_MOVEMENT_COLUMNS,
-                       SECTION_BY_CONTROL, SECTION_BY_PORTFOLIO, SECTION_BY_SEVERITY,
+                       SECTION_BY_CONTROL, SECTION_BY_DIMENSION, SECTION_BY_PORTFOLIO,
+                       SECTION_BY_SEVERITY,
                        SECTION_MARKET_VALUE, SECTION_OVERVIEW, SECTION_PRICE_MOVES,
                        SECTION_UPCOMING_CASHFLOWS, STATUS_PAID, SUMMARY_COLUMNS,
                        UPCOMING_CASHFLOW_COLUMNS, conform)
@@ -133,6 +135,8 @@ def summary(exceptions: pd.DataFrame, data: InputData, ctx: Context) -> pd.DataF
     for control_id, settings in ctx.config.controls.items():
         if settings.enabled:
             add(SECTION_BY_CONTROL, control_id, (exceptions["ControlID"] == control_id).sum())
+    for dimension in ctx.config.dimensions:
+        add(SECTION_BY_DIMENSION, dimension, (exceptions["Dimension"] == dimension).sum())
     for portfolio in portfolios_to_report(exceptions, ctx):
         found = (exceptions["Portfolio"].isna() if portfolio == NO_PORTFOLIO
                  else exceptions["Portfolio"] == portfolio)
@@ -149,6 +153,26 @@ def summary(exceptions: pd.DataFrame, data: InputData, ctx: Context) -> pd.DataF
     add(SECTION_PRICE_MOVES, "Breaches", moves["Breach"].fillna(False).sum())
     add(SECTION_PRICE_MOVES, "Not computable", len(moves) - computed)
     return conform(pd.DataFrame(rows, columns=list(SUMMARY_COLUMNS)), SUMMARY_COLUMNS)
+
+
+def dimension_quality(exceptions: pd.DataFrame, ctx: Context) -> pd.DataFrame:
+    """Exceptions per data quality dimension, with their severity split.
+
+    Returns output_spec.md section 4b: one row per dimension of config.yaml, in
+    that order, zeros included. Controls lists the enabled controls of the
+    dimension (comma-separated), empty when none is enabled.
+    """
+    rows = []
+    for dimension in ctx.config.dimensions:
+        controls = [control_id for control_id, settings in ctx.config.controls.items()
+                    if settings.enabled and settings.dimension == dimension]
+        found = exceptions[exceptions["Dimension"] == dimension]
+        severities = found["Severity"].astype(str)
+        rows.append({"Dimension": dimension, "Controls": ", ".join(controls) or None,
+                     "Exceptions": len(found),
+                     **{severity: int((severities == severity).sum()) for severity in SEVERITIES}})
+    return conform(pd.DataFrame(rows, columns=list(DIMENSION_QUALITY_COLUMNS)),
+                   DIMENSION_QUALITY_COLUMNS)
 
 
 def price_change_pct(market_price: pd.Series, previous_price: pd.Series) -> pd.Series:

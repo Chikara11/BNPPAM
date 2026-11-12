@@ -45,15 +45,16 @@ One row per exception. Format referenced by CLAUDE.md.
 | 1 | ExceptionID | object | no | `EXC-0001`, zero-padded to 4 digits, assigned after sorting |
 | 2 | Severity | category (ordered: Critical < Warning < Information for sorting) | no | From config.yaml |
 | 3 | ControlID | object | no | Key in config.yaml, e.g. `PRICE_MOVE_ABOVE_THRESHOLD` |
-| 4 | AnomalyType | object | no | Control `label` from config.yaml |
-| 5 | Source | object | no | Input file: `positions`, `previous_prices` or `cashflows` |
-| 6 | Portfolio | object | yes | |
-| 7 | ISIN | object | yes | Empty for MISSING_ISIN |
-| 8 | SecurityName | object | yes | Empty when unknown (e.g. unmatched cashflow) |
-| 9 | Field | object | no | Column checked; key columns joined with `+` for duplicates and unmatched cashflows |
-| 10 | ObservedValue | object | yes | Value as text (raw text for conversion failures) |
-| 11 | Comment | object | no | Plain-language explanation with the expected rule and, for multi-row exceptions, all rows |
-| 12 | SourceRow | Int64 | no | Excel row number (header = 1); first row for multi-row exceptions |
+| 4 | Dimension | object | no | Data quality dimension of the control, from config.yaml |
+| 5 | AnomalyType | object | no | Control `label` from config.yaml |
+| 6 | Source | object | no | Input file: `positions`, `previous_prices` or `cashflows` |
+| 7 | Portfolio | object | yes | |
+| 8 | ISIN | object | yes | Empty for MISSING_ISIN |
+| 9 | SecurityName | object | yes | Empty when unknown (e.g. unmatched cashflow) |
+| 10 | Field | object | no | Column checked; key columns joined with `+` for duplicates and unmatched cashflows |
+| 11 | ObservedValue | object | yes | Value as text (raw text for conversion failures) |
+| 12 | Comment | object | no | Plain-language explanation with the expected rule and, for multi-row exceptions, all rows |
+| 13 | SourceRow | Int64 | no | Excel row number (header = 1); first row for multi-row exceptions |
 
 Sort order: Severity (Critical, Warning, Information), ControlID, Portfolio,
 ISIN, SourceRow, Field (last tie-breaker, e.g. two INVALID_PRICE on the same
@@ -145,6 +146,32 @@ Sort order: Source in the order above, then column order of data_spec.md.
 
 ---
 
+## 4b. `dimension_quality`
+
+One row per data quality dimension of `config.yaml` (`dimensions`), in that
+order, zeros included. Each control belongs to exactly one dimension
+(`controls.<ID>.dimension`).
+
+| # | Column | dtype | Nullable | Description |
+|---|---|---|---|---|
+| 1 | Dimension | object | no | Completeness, Validity, Uniqueness, Consistency, Timeliness, Plausibility |
+| 2 | Controls | object | yes | Enabled controls of the dimension, comma-separated, in config.yaml order; empty if none is enabled |
+| 3 | Exceptions | Int64 | no | Exceptions raised by these controls |
+| 4 | Critical | Int64 | no | Of which Critical |
+| 5 | Warning | Int64 | no | Of which Warning |
+| 6 | Information | Int64 | no | Of which Information |
+
+Notes:
+- Plausibility = review alerts (e.g. large price moves), not necessarily
+  data errors. They are counted in the totals like the other dimensions.
+- **[Limitation]** One control belongs to one dimension. INVALID_VALUE is
+  in Validity although it also reports invalid dates (MaturityDate,
+  CashflowDate after maturity, PreviousDate) and empty rows, which are
+  closer to Timeliness and Completeness. Splitting them would need new
+  control IDs.
+
+---
+
 ## 5. `summary`
 
 **[Decision]** Long format, so one table holds every headline figure and
@@ -167,6 +194,8 @@ Sections, in this order:
    the upcoming cashflows; they are in the totals).
 2. `Exceptions by severity`: Critical, Warning, Information (zeros included).
 3. `Exceptions by control`: every enabled control (zeros included).
+3b. `Exceptions by dimension`: every dimension of config.yaml, in that
+   order (zeros included).
 4. `Exceptions by portfolio`: every portfolio, plus `(none)` for exceptions
    without a portfolio.
 5. `Market value by currency`: sum of MarketValue where computable.

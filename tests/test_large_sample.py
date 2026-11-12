@@ -154,3 +154,13 @@ def test_data_spec_size_table_matches_the_files(folder):
     sizes = [int(cell.replace(",", "")) for cell in line.split("|")[2:5]]
     data = load(REPO_ROOT / folder)
     assert sizes == [len(data.positions), len(data.previous_prices), len(data.cashflows)]
+
+
+def test_large_sample_dimension_block_matches_the_manifest(large_results, large_manifest):
+    # Expected per dimension = manifest counts per control, grouped by the
+    # dimension of each control in config.yaml.
+    expected = expected_rows(large_manifest)
+    dimension = expected["ExpectedControl"].map(lambda control: CONFIG.controls[control].dimension)
+    per_dimension = expected.groupby(dimension)["ExpectedExceptionCount"].sum()
+    block = large_results.dimension_quality.set_index("Dimension")["Exceptions"]
+    assert block.to_dict() == {name: per_dimension.get(name, 0) for name in CONFIG.dimensions}

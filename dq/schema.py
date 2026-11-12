@@ -29,6 +29,7 @@ COMPUTED = "Computed"
 SECTION_OVERVIEW = "Overview"
 SECTION_BY_SEVERITY = "Exceptions by severity"
 SECTION_BY_CONTROL = "Exceptions by control"
+SECTION_BY_DIMENSION = "Exceptions by dimension"
 SECTION_BY_PORTFOLIO = "Exceptions by portfolio"
 SECTION_MARKET_VALUE = "Market value by currency"
 SECTION_UPCOMING_CASHFLOWS = "Upcoming cashflows by currency"
@@ -39,6 +40,7 @@ EXCEPTION_COLUMNS = {
     "ExceptionID": "object",
     "Severity": SEVERITY_DTYPE,
     "ControlID": "object",
+    "Dimension": "object",
     "AnomalyType": "object",
     "Source": "object",
     "Portfolio": "object",
@@ -101,6 +103,14 @@ PARSE_ISSUE_COLUMNS = {
     "SourceRow": "Int64",
     "Column": "object",
     "RawValue": "object",
+}
+
+# section 4b: one row per data quality dimension of config.yaml
+DIMENSION_QUALITY_COLUMNS = {
+    "Dimension": "object",
+    "Controls": "object",
+    "Exceptions": "Int64",
+    **{severity: "Int64" for severity in SEVERITIES},
 }
 
 SUMMARY_COLUMNS = {

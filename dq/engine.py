@@ -26,6 +26,7 @@ class Results:
     price_movements: pd.DataFrame
     upcoming_cashflows: pd.DataFrame
     data_quality: pd.DataFrame
+    dimension_quality: pd.DataFrame
     summary: pd.DataFrame
 
 
@@ -48,6 +49,7 @@ def run(data: InputData, config: Config) -> Results:
         price_movements=analytics.price_movements(data, ctx),
         upcoming_cashflows=analytics.upcoming_cashflows(data, ctx),
         data_quality=analytics.data_quality(data, ctx),
+        dimension_quality=analytics.dimension_quality(exceptions, ctx),
         summary=analytics.summary(exceptions, data, ctx),
     )
 

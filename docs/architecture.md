@@ -130,7 +130,8 @@ config.yaml ──► config.load_config() ──► Config ────┤
 - `Config` is a frozen dataclass mirroring `config.yaml`; its mappings are
   read-only and it keeps the raw dict (`raw`) for `with_overrides` and the
   Parameters sheet.
-- Validates on load: every control has `enabled`, `severity`, `label`;
+- Validates on load: every control has `enabled`, `severity`, `label`,
+  `dimension` (one of the `dimensions` list, which has no repeat);
   severities are Critical / Warning / Information; thresholds exist for each
   asset type; every required column has a type in `COLUMN_TYPES` (the
   column types of `docs/data_spec.md`, defined in `config.py` and used by
@@ -290,7 +291,10 @@ Pure functions, same inputs as controls, returning the non-exception outputs:
   `NotApplicable` column counts cells where a value is not expected (an
   empty Rating on CLO Equity); completeness is computed on applicable rows
   only;
-- `summary(exceptions, data, ctx)`: counts by severity, control, portfolio,
+- `dimension_quality(exceptions, ctx)`: one row per dimension of config.yaml
+  (enabled controls, exceptions, severity split; zeros included);
+- `summary(exceptions, data, ctx)`: counts by severity, control, dimension,
+  portfolio,
   and the headline figures of the executive summary, including
   "Position rows not at the reference date: N (ignored)" (the rows removed
   by the engine filter of section 4.7; information only, no exception).
@@ -315,7 +319,8 @@ the price change formula and its rounding are those of `CLAUDE.md`.
 - Severity is sorted as an ordered categorical: Critical > Warning >
   Information (not alphabetically).
 - `Results` (frozen dataclass): `reference_date`, `config`, `exceptions`,
-  `price_movements`, `upcoming_cashflows`, `data_quality`, `summary`.
+  `price_movements`, `upcoming_cashflows`, `data_quality`,
+  `dimension_quality`, `summary`.
 
 ### 4.8 `report.py`
 - `write_report(results: Results, path_or_buffer, *, generated_at=None) -> None`

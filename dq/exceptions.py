@@ -15,7 +15,7 @@ def make_exceptions(rows: pd.DataFrame, control_id: str, ctx: Context, file: str
                     comment: str | pd.Series) -> pd.DataFrame:
     """Build one exception per row of `rows` in the common exception format.
 
-    Severity and AnomalyType come from config.yaml; Portfolio, ISIN,
+    Severity, Dimension and AnomalyType come from config.yaml; Portfolio, ISIN,
     SecurityName and SourceRow from the row; `observed` (aligned on rows)
     becomes ObservedValue as text. Returns output_spec.md section 1.
     """
@@ -26,6 +26,7 @@ def make_exceptions(rows: pd.DataFrame, control_id: str, ctx: Context, file: str
         "ExceptionID": None,  # assigned by the engine after sorting
         "Severity": settings.severity,
         "ControlID": control_id,
+        "Dimension": settings.dimension,
         "AnomalyType": settings.label,
         "Source": file,
         "Portfolio": column_or_empty(rows, "Portfolio"),

@@ -5,7 +5,8 @@ from dq.analytics import data_quality, price_movements, upcoming_cashflows
 from dq.config import with_overrides
 from dq.context import build_context
 from dq.engine import run
-from dq.schema import (DATA_QUALITY_COLUMNS, EXCEPTION_COLUMNS, PRICE_MOVEMENT_COLUMNS,
+from dq.schema import (DATA_QUALITY_COLUMNS, DIMENSION_QUALITY_COLUMNS, EXCEPTION_COLUMNS,
+                       PRICE_MOVEMENT_COLUMNS,
                        SUMMARY_COLUMNS, UPCOMING_CASHFLOW_COLUMNS, empty_frame)
 from helpers import CONFIG, cashflow, make_data, parse_issue, position, price
 
@@ -37,6 +38,7 @@ def test_every_output_conforms_to_the_schema(input_results):
                             ("price_movements", PRICE_MOVEMENT_COLUMNS),
                             ("upcoming_cashflows", UPCOMING_CASHFLOW_COLUMNS),
                             ("data_quality", DATA_QUALITY_COLUMNS),
+                            ("dimension_quality", DIMENSION_QUALITY_COLUMNS),
                             ("summary", SUMMARY_COLUMNS)]:
         frame = getattr(input_results, output)
         assert list(frame.columns) == list(columns)
@@ -246,3 +248,43 @@ def test_duplicated_rows_stay_in_the_totals():
     assert summary_value(results, "Overview", "Cashflows in the horizon") == 2
     assert summary_value(results, "Upcoming cashflows by currency", "Upcoming cashflows",
                          "EUR") == 2 * 75000.0
+
+
+def test_every_exception_carries_the_dimension_of_its_control(input_results):
+    exceptions = input_results.exceptions
+    expected = exceptions["ControlID"].map(lambda control: CONFIG.controls[control].dimension)
+    assert exceptions["Dimension"].tolist() == expected.tolist()
+
+
+def test_dimension_quality_adds_up_to_the_exceptions(input_results):
+    block = input_results.dimension_quality
+    exceptions = input_results.exceptions
+    assert block["Dimension"].tolist() == list(CONFIG.dimensions)  # config order, zeros kept
+    assert block["Exceptions"].sum() == len(exceptions)
+    for row in block.itertuples(index=False):
+        found = exceptions[exceptions["Dimension"] == row.Dimension]
+        assert row.Exceptions == len(found)
+        assert (row.Critical, row.Warning, row.Information) == tuple(
+            (found["Severity"] == severity).sum() for severity in ("Critical", "Warning",
+                                                                    "Information"))
+        assert set(row.Controls.split(", ")) == {
+            control for control, settings in CONFIG.controls.items()
+            if settings.dimension == row.Dimension}
+
+
+def test_dimension_quality_lists_only_enabled_controls(input_data):
+    config = with_overrides(CONFIG, {"controls": {"PAST_FORECAST_CASHFLOW": {"enabled": False},
+                                                  "MISSING_ISIN": {"enabled": False}}})
+    block = run(input_data, config).dimension_quality.set_index("Dimension")
+    assert pd.isna(block.loc["Timeliness", "Controls"])  # no enabled control left
+    assert block.loc["Timeliness", "Exceptions"] == 0
+    assert "MISSING_ISIN" not in block.loc["Completeness", "Controls"]
+
+
+def test_summary_counts_exceptions_by_dimension(input_results):
+    summary = input_results.summary
+    rows = summary[summary["Section"] == "Exceptions by dimension"]
+    assert rows["Item"].tolist() == list(CONFIG.dimensions)
+    assert rows["Value"].sum() == len(input_results.exceptions)
+    block = input_results.dimension_quality
+    assert rows["Value"].tolist() == block["Exceptions"].astype(float).tolist()

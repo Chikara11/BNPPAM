@@ -39,7 +39,7 @@ COLUMN_TYPES = {
 TOP_LEVEL_KEYS = (
     "reference_date", "cashflow_horizon_days", "isin_pattern", "price_move_thresholds_pct",
     "rating_required_for", "amount_sign", "allowed_values", "required_columns", "keys",
-    "controls",
+    "dimensions", "controls",
 )
 
 # Each key of config.yaml "keys" and the input file(s) whose columns it uses.
@@ -60,6 +60,7 @@ class ControlSettings:
     enabled: bool
     severity: str
     label: str
+    dimension: str  # one of Config.dimensions
 
 
 @dataclass(frozen=True)
@@ -73,6 +74,7 @@ class Config:
     allowed_values: Mapping[str, tuple[str, ...]]
     required_columns: Mapping[str, tuple[str, ...]]
     keys: Mapping[str, tuple[str, ...]]
+    dimensions: tuple[str, ...]  # display order
     controls: Mapping[str, ControlSettings]  # config.yaml order = run order
     raw: Mapping[str, Any]  # read-only copy of the YAML, for overrides and audit
 
@@ -115,6 +117,7 @@ def config_from_dict(raw: dict) -> Config:
         allowed_values=freeze(raw["allowed_values"]),
         required_columns=freeze(raw["required_columns"]),
         keys=freeze(raw["keys"]),
+        dimensions=tuple(raw["dimensions"]),
         controls=MappingProxyType(
             {control_id: ControlSettings(**settings)
              for control_id, settings in raw["controls"].items()}),
@@ -149,6 +152,7 @@ def validate_config(raw: dict) -> None:
         + check_amount_sign(raw)
         + check_required_columns(raw)
         + check_keys(raw)
+        + check_dimensions(raw)
         + check_controls(raw)
     )
     if problems:
@@ -274,9 +278,10 @@ def check_controls(raw: dict) -> list[str]:
     problems = []
     for control_id, settings in controls.items():
         if not isinstance(settings, Mapping):
-            problems.append(f"controls.{control_id} must have enabled, severity and label.")
+            problems.append(f"controls.{control_id} must have enabled, severity, label and "
+                            f"dimension.")
             continue
-        unknown = sorted(set(settings) - {"enabled", "severity", "label"})
+        unknown = sorted(set(settings) - {"enabled", "severity", "label", "dimension"})
         if unknown:
             problems.append(f"controls.{control_id}: unknown setting(s) {', '.join(unknown)}.")
         if not isinstance(settings.get("enabled"), bool):
@@ -287,7 +292,19 @@ def check_controls(raw: dict) -> list[str]:
         label = settings.get("label")
         if not isinstance(label, str) or not label.strip():
             problems.append(f"controls.{control_id}.label must be a non-empty text.")
+        dimensions = raw["dimensions"] if is_text_list(raw["dimensions"]) else []
+        if settings.get("dimension") not in dimensions:
+            problems.append(f"controls.{control_id}.dimension must be one of the dimensions "
+                            f"list (got {settings.get('dimension')!r}).")
     return problems
+
+
+def check_dimensions(raw: dict) -> list[str]:
+    dimensions = raw["dimensions"]
+    if not is_text_list(dimensions):
+        return ["dimensions must be a non-empty list of texts."]
+    repeated = sorted({value for value in dimensions if dimensions.count(value) > 1})
+    return [f"dimensions: {value} is listed twice." for value in repeated]
 
 
 def parse_reference_date(value: Any) -> pd.Timestamp | None:

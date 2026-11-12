@@ -59,65 +59,85 @@ keys:
   cashflow_to_position: [Portfolio, ISIN]
   previous_price_unique: [ISIN, PreviousDate]
 
-# Controls: on/off switch, severity (Critical | Warning | Information), label.
+# Data quality dimensions, in display order. Each control belongs to one.
+# Plausibility = review alerts (e.g. large price moves), not necessarily data errors.
+dimensions: [Completeness, Validity, Uniqueness, Consistency, Timeliness, Plausibility]
+
+# Controls: on/off switch, severity (Critical | Warning | Information), label,
+# dimension (one of the dimensions above).
 controls:
   MISSING_ISIN:
     enabled: true
     severity: Critical
     label: Missing ISIN
+    dimension: Completeness
   DUPLICATE_POSITION:
     enabled: true
     severity: Critical
     label: Duplicate position
+    dimension: Uniqueness
   MISSING_MARKET_PRICE:
     enabled: true
     severity: Critical
     label: Missing market price
+    dimension: Completeness
   INVALID_NOMINAL:
     enabled: true
     severity: Critical
     label: Zero or negative nominal
+    dimension: Validity
   INVALID_PRICE:
     enabled: true
     severity: Critical
     label: Zero or negative price
+    dimension: Validity
   MISSING_RATING:
     enabled: true
     severity: Warning
     label: Missing rating
+    dimension: Completeness
   PRICE_MOVE_ABOVE_THRESHOLD:
     enabled: true
     severity: Warning
     label: Price movement above threshold
+    dimension: Plausibility
   NO_PRICE_HISTORY:
     enabled: true
     severity: Information
     label: New security without price history
+    dimension: Consistency
   DUPLICATE_PREVIOUS_PRICE:
     enabled: true
     severity: Warning
     label: Duplicate previous price
+    dimension: Uniqueness
   UNMATCHED_CASHFLOW:
     enabled: true
     severity: Warning
     label: Cashflow without matching position
+    dimension: Consistency
   DUPLICATE_CASHFLOW:
     enabled: true
     severity: Warning
     label: Duplicate cashflow
+    dimension: Uniqueness
   PAST_FORECAST_CASHFLOW:
     enabled: true
     severity: Warning
     label: Past-dated cashflow still Forecast
+    dimension: Timeliness
   CURRENCY_MISMATCH:
     enabled: true
     severity: Information
     label: Cashflow currency differs from position currency
+    dimension: Consistency
   INVALID_VALUE:
     enabled: true
     severity: Warning
     label: Value outside allowed list or invalid date
+    dimension: Validity
   MISSING_VALUE:
     enabled: true
     severity: Warning
     label: Other required value missing
+    dimension: Completeness

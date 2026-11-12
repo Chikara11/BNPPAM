@@ -68,6 +68,7 @@ def test_exception_is_built_from_the_row_and_the_config(input_data):
     assert exception["ISIN"] is None
     assert exception["Severity"] == "Critical"
     assert exception["AnomalyType"] == "Missing ISIN"
+    assert exception["Dimension"] == "Completeness"
     assert (exception["Source"], exception["Field"]) == ("positions", "ISIN")
     assert exceptions.dtypes.equals(empty_exceptions().dtypes)
 
@@ -110,7 +111,8 @@ def test_unknown_severity_is_rejected(input_data):
 
 
 def exceptions_frame(rows: list[dict]) -> pd.DataFrame:
-    filler = {"ExceptionID": None, "ControlID": "X", "AnomalyType": "x", "Source": "positions",
+    filler = {"ExceptionID": None, "ControlID": "X", "Dimension": "Validity", "AnomalyType": "x",
+              "Source": "positions",
               "ISIN": "SYN000000001", "SecurityName": None, "ObservedValue": None,
               "Comment": "x", "Field": "F"}
     return conform(pd.DataFrame([{**filler, **row} for row in rows]), EXCEPTION_COLUMNS)

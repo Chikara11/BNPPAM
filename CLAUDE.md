@@ -183,6 +183,19 @@ The engine follows these rules:
     one PAST_FORECAST_CASHFLOW. Rows that the duplicate control does not
     compare (incomplete key, invalid ISIN) are always evaluated.
 
+## Data quality dimensions (configurable)
+Each control belongs to one dimension (`controls.<ID>.dimension` in
+config.yaml, validated at load against the `dimensions` list):
+- Completeness: MISSING_ISIN, MISSING_MARKET_PRICE, MISSING_RATING, MISSING_VALUE.
+- Validity: INVALID_NOMINAL, INVALID_PRICE, INVALID_VALUE (which also covers
+  invalid dates and empty rows: documented limitation, output_spec.md 4b).
+- Uniqueness: DUPLICATE_POSITION, DUPLICATE_CASHFLOW, DUPLICATE_PREVIOUS_PRICE.
+- Consistency: UNMATCHED_CASHFLOW, CURRENCY_MISMATCH, NO_PRICE_HISTORY.
+- Timeliness: PAST_FORECAST_CASHFLOW.
+- Plausibility: PRICE_MOVE_ABOVE_THRESHOLD (a review alert, not a data error).
+Every exception carries its Dimension; the summary and the Data Quality
+sheet / tab count exceptions per dimension (zeros included).
+
 ## Severity (defaults, configurable)
 Critical:
 - Missing ISIN.
@@ -216,8 +229,8 @@ Information:
   Package `dq/` at the repo root; structure and contracts in
   `docs/architecture.md`.
 - One rule = one function returning exceptions in a common format:
-  ExceptionID, Severity, ControlID, AnomalyType, Source, Portfolio, ISIN,
-  SecurityName, Field, ObservedValue, Comment, SourceRow.
+  ExceptionID, Severity, ControlID, Dimension, AnomalyType, Source,
+  Portfolio, ISIN, SecurityName, Field, ObservedValue, Comment, SourceRow.
   `docs/output_spec.md` is the single detailed definition (names, order,
   dtypes).
 - Keep calculations and exception detection deterministic.

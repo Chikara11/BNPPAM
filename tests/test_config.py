@@ -31,6 +31,8 @@ def test_real_config_loads(raw_yaml):
     assert config.keys["position_unique"] == ("ValuationDate", "Portfolio", "ISIN")
     assert config.controls["MISSING_ISIN"].severity == "Critical"
     assert config.controls["NO_PRICE_HISTORY"].label == "New security without price history"
+    assert config.dimensions[0] == "Completeness" and len(config.dimensions) == 6
+    assert config.controls["NO_PRICE_HISTORY"].dimension == "Consistency"
 
 
 def test_controls_keep_the_yaml_order(raw_yaml):
@@ -143,6 +145,18 @@ def break_isin_pattern(raw):
     raw["isin_pattern"] = "^SYN[0-9"
 
 
+def break_missing_dimension(raw):
+    del raw["controls"]["MISSING_VALUE"]["dimension"]
+
+
+def break_unknown_dimension(raw):
+    raw["controls"]["INVALID_VALUE"]["dimension"] = "Accuracy"
+
+
+def break_repeated_dimension(raw):
+    raw["dimensions"].append("Validity")
+
+
 def break_required_column_without_type(raw):
     raw["required_columns"]["positions"].append("Seniority")
 
@@ -164,6 +178,9 @@ def break_required_column_without_type(raw):
     (break_isin_pattern, "isin_pattern"),
     (break_amount_sign_value, "amount_sign.Fee"),
     (break_amount_sign_type, "Dividend is not an allowed CashflowType"),
+    (break_missing_dimension, "controls.MISSING_VALUE.dimension"),
+    (break_unknown_dimension, "controls.INVALID_VALUE.dimension .*'Accuracy'"),
+    (break_repeated_dimension, "Validity is listed twice"),
 ])
 def test_invalid_config_raises_a_clear_error(raw, breaker, named):
     breaker(raw)
