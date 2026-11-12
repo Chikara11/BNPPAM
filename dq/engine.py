@@ -7,10 +7,10 @@ import pandas as pd
 from dq.config import Config
 from dq.context import Context, build_context, positions_at_reference_date
 from dq.controls import CONTROL_REGISTRY
+from dq.exceptions import combine_exceptions
 from dq.loaders import InputData
-from dq.schema import (DATA_QUALITY_COLUMNS, EXCEPTION_COLUMNS, PRICE_MOVEMENT_COLUMNS,
-                       SUMMARY_COLUMNS, UPCOMING_CASHFLOW_COLUMNS, conform, empty_exceptions,
-                       empty_frame)
+from dq.schema import (DATA_QUALITY_COLUMNS, PRICE_MOVEMENT_COLUMNS, SUMMARY_COLUMNS,
+                       UPCOMING_CASHFLOW_COLUMNS, empty_frame)
 
 SORT_COLUMNS = ["Severity", "ControlID", "Portfolio", "ISIN", "SourceRow", "Field"]
 
@@ -62,12 +62,9 @@ def check_registry(config: Config) -> None:
 
 def run_controls(data: InputData, ctx: Context) -> pd.DataFrame:
     # config.yaml order = run order
-    found = [CONTROL_REGISTRY[control_id](data, ctx)
-             for control_id, settings in ctx.config.controls.items() if settings.enabled]
-    found = [exceptions for exceptions in found if not exceptions.empty]
-    if not found:
-        return empty_exceptions()
-    return conform(pd.concat(found, ignore_index=True), EXCEPTION_COLUMNS)
+    return combine_exceptions([CONTROL_REGISTRY[control_id](data, ctx)
+                               for control_id, settings in ctx.config.controls.items()
+                               if settings.enabled])
 
 
 def sort_exceptions(exceptions: pd.DataFrame) -> pd.DataFrame:

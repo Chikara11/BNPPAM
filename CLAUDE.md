@@ -94,6 +94,7 @@ Detect:
 - Past-dated cashflows still marked Forecast.
 - Cashflow currency different from its position currency.
 - Values outside the allowed lists of config.yaml.
+- ISIN not matching `isin_pattern` of config.yaml (`^SYN\d{9}$`, data_spec.md).
 - Invalid dates: MaturityDate on or before the reference date, cashflow
   dated after the MaturityDate of its position, PreviousDate on or after
   the reference date.
@@ -110,6 +111,13 @@ The engine follows these rules:
    Controls that do not depend on the ISIN still run on it: a missing ISIN
    and, for example, a negative Nominal are two different problems and
    raise two exceptions.
+   An ISIN that is present but does not match `isin_pattern` (config.yaml)
+   is treated like a missing ISIN, in all 3 files: it raises only
+   INVALID_VALUE and every ISIN-based control skips the row (duplicate keys,
+   price history and movement, cashflow matching, currency and maturity
+   checks). In previous_prices every control is ISIN-based, since prices of
+   securities not held are ignored: a price row with an empty or badly
+   formatted ISIN raises only that ISIN exception.
 2. Only ISIN, MarketPrice and Rating have a dedicated "missing" control
    (MISSING_ISIN, MISSING_MARKET_PRICE, MISSING_RATING). MISSING_VALUE
    covers every other required field, including Nominal, BookPrice and
@@ -155,6 +163,12 @@ The engine follows these rules:
     by INVALID_VALUE with Field `row` and Comment `Empty row`, and is
     excluded from every other control (otherwise it would raise one
     MISSING_* exception per column).
+12. When rows share a duplicate key (positions, previous prices,
+    cashflows), only the duplicate control reports the extra rows; every
+    other control evaluates the first occurrence only (lowest SourceRow).
+    A duplicated past Forecast cashflow gives one DUPLICATE_CASHFLOW and
+    one PAST_FORECAST_CASHFLOW. Rows that the duplicate control does not
+    compare (incomplete key, invalid ISIN) are always evaluated.
 
 ## Severity (defaults, configurable)
 Critical:

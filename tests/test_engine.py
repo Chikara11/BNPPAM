@@ -6,7 +6,6 @@ import pytest
 
 from dq.config import config_from_dict, load_config, thaw, with_overrides
 from dq.context import build_context, positions_at_reference_date
-from dq.controls import CONTROL_REGISTRY
 from dq.engine import RegistryError, assign_exception_ids, check_registry, run, sort_exceptions
 from dq.exceptions import make_exceptions
 from dq.loaders import InputSchemaError
@@ -124,22 +123,15 @@ def exceptions_frame(rows: list[dict]) -> pd.DataFrame:
 
 
 @pytest.fixture(scope="module")
-def isin_only_config(test_config):
+def isin_only_config(real_config):
     # Every other control disabled, so these engine tests only see MISSING_ISIN.
-    return with_overrides(test_config, {"controls": {
+    return with_overrides(real_config, {"controls": {
         control_id: {"enabled": control_id == "MISSING_ISIN"}
-        for control_id in test_config.controls}})
+        for control_id in real_config.controls}})
 
 
-def test_real_config_needs_every_control_registered(real_config, data):
-    # TEMPORARY: removed when the last control is registered.
-    missing = [control for control in real_config.controls if control not in CONTROL_REGISTRY]
-    assert len(missing) == len(real_config.controls) - len(CONTROL_REGISTRY) > 0
-    with pytest.raises(RegistryError) as error:
-        check_registry(real_config)
-    assert all(control in str(error.value) for control in missing)
-    with pytest.raises(RegistryError):
-        run(data, real_config)
+def test_real_config_matches_the_registry(real_config):
+    check_registry(real_config)
 
 
 def test_registered_control_missing_from_the_config_is_an_error(real_config):
@@ -182,8 +174,8 @@ def test_disabled_control_does_not_run(data, isin_only_config):
     assert exceptions.dtypes.equals(empty_exceptions().dtypes)
 
 
-def test_same_inputs_give_the_same_exceptions(data, test_config, input_results):
-    pd.testing.assert_frame_equal(run(data, test_config).exceptions, input_results.exceptions)
+def test_same_inputs_give_the_same_exceptions(data, real_config, input_results):
+    pd.testing.assert_frame_equal(run(data, real_config).exceptions, input_results.exceptions)
 
 
 def test_empty_row_does_not_raise_missing_isin(data, isin_only_config):

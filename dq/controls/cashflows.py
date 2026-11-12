@@ -3,17 +3,20 @@ from __future__ import annotations
 import pandas as pd
 
 from dq.context import Context
+from dq.controls.common import duplicate_candidates, evaluated_rows, valid_isin
 from dq.exceptions import make_duplicate_exceptions, make_exceptions
 from dq.loaders import InputData
 
 
 def check_unmatched_cashflow(data: InputData, ctx: Context) -> pd.DataFrame:
     # Rule 4: Portfolio + ISIN must exist in the positions; never a row join.
-    # An empty Portfolio or ISIN is reported by MISSING_VALUE, not here.
+    # An empty Portfolio or ISIN is reported by MISSING_VALUE, a bad ISIN or a
+    # Portfolio outside the allowed list by INVALID_VALUE, not here.
     key = ctx.config.keys["cashflow_to_position"]
     cashflows = data.cashflows
-    unmatched = has_key(cashflows, key) & ~matches_a_position(data, key)
-    rows = with_security_name(data, cashflows[unmatched], key)
+    unmatched = (matchable(data, ctx) & allowed_portfolio(cashflows, ctx)
+                 & ~matches_a_position(data, ctx))
+    rows = with_security_name(data, cashflows[unmatched], ctx)
     return make_exceptions(
         rows, "UNMATCHED_CASHFLOW", ctx, "cashflows", "+".join(key),
         observed=key_text(rows, key),
@@ -22,19 +25,19 @@ def check_unmatched_cashflow(data: InputData, ctx: Context) -> pd.DataFrame:
 
 
 def check_duplicate_cashflow(data: InputData, ctx: Context) -> pd.DataFrame:
-    key = ctx.config.keys["cashflow_unique"]
-    cashflows = data.cashflows
-    rows = with_security_name(data, cashflows[has_key(cashflows, key)],
-                              ctx.config.keys["cashflow_to_position"])
-    return make_duplicate_exceptions(rows, key, "DUPLICATE_CASHFLOW", ctx, "cashflows")
+    candidates = duplicate_candidates(data, "cashflows", ctx)
+    rows = with_security_name(data, data.cashflows[candidates], ctx)
+    return make_duplicate_exceptions(rows, ctx.config.keys["cashflow_unique"],
+                                     "DUPLICATE_CASHFLOW", ctx, "cashflows")
 
 
 def check_past_forecast_cashflow(data: InputData, ctx: Context) -> pd.DataFrame:
     # "Past-dated" = strictly before the reference date. A Status outside the
     # allowed values (e.g. " Forecast") is reported by INVALID_VALUE only.
     cashflows = data.cashflows
-    past = (cashflows["Status"] == "Forecast") & (cashflows["CashflowDate"] < ctx.reference_date)
-    rows = with_security_name(data, cashflows[past], ctx.config.keys["cashflow_to_position"])
+    past = (evaluated_rows(data, "cashflows", ctx) & (cashflows["Status"] == "Forecast")
+            & (cashflows["CashflowDate"] < ctx.reference_date))
+    rows = with_security_name(data, cashflows[past], ctx)
     return make_exceptions(
         rows, "PAST_FORECAST_CASHFLOW", ctx, "cashflows", "CashflowDate",
         observed=rows["CashflowDate"],
@@ -49,17 +52,18 @@ def check_currency_mismatch(data: InputData, ctx: Context) -> pd.DataFrame:
     key = ctx.config.keys["cashflow_to_position"]
     allowed = set(ctx.config.allowed_values["Currency"])
     cashflows = data.cashflows
+    positions = matching_positions(data, ctx)
     currencies_by_key: dict[tuple, set] = {}
-    for values, currency in zip(key_tuples(positions_with_key(data, key), key),
-                                positions_with_key(data, key)["Currency"]):
+    for values, currency in zip(key_tuples(positions, key), positions["Currency"]):
         if currency in allowed:
             currencies_by_key.setdefault(values, set()).add(currency)
     expected = [currencies_by_key.get(values, set()) for values in key_tuples(cashflows, key)]
-    mismatch = pd.Series(
+    different = pd.Series(
         [currency in allowed and bool(currencies) and currency not in currencies
          for currency, currencies in zip(cashflows["Currency"], expected)],
-        index=cashflows.index) & has_key(cashflows, key) & matches_a_position(data, key)
-    rows = with_security_name(data, cashflows[mismatch], key)
+        index=cashflows.index)
+    mismatch = matchable(data, ctx) & matches_a_position(data, ctx) & different
+    rows = with_security_name(data, cashflows[mismatch], ctx)
     comments = [f"Cashflow in {currency}, position in {', '.join(sorted(currencies))}."
                 for currency, currencies, flagged in zip(cashflows["Currency"], expected, mismatch)
                 if flagged]
@@ -69,24 +73,41 @@ def check_currency_mismatch(data: InputData, ctx: Context) -> pd.DataFrame:
     )
 
 
-def has_key(frame: pd.DataFrame, key: tuple[str, ...]) -> pd.Series:
-    return frame[list(key)].notna().all(axis=1)
+def matchable(data: InputData, ctx: Context) -> pd.Series:
+    # Evaluated rows (rules 11, 12) with a complete key and a valid ISIN (rule 1).
+    key = ctx.config.keys["cashflow_to_position"]
+    cashflows = data.cashflows
+    return (evaluated_rows(data, "cashflows", ctx) & valid_isin(cashflows, ctx)
+            & cashflows[list(key)].notna().all(axis=1))
 
 
-def positions_with_key(data: InputData, key: tuple[str, ...]) -> pd.DataFrame:
-    return data.positions[has_key(data.positions, key)]
+def allowed_portfolio(cashflows: pd.DataFrame, ctx: Context) -> pd.Series:
+    allowed = ctx.config.allowed_values.get("Portfolio")
+    if allowed is None:
+        return pd.Series(True, index=cashflows.index)
+    return cashflows["Portfolio"].isin(allowed)
 
 
-def matches_a_position(data: InputData, key: tuple[str, ...]) -> pd.Series:
-    held = pd.MultiIndex.from_frame(positions_with_key(data, key)[list(key)])
+def matching_positions(data: InputData, ctx: Context) -> pd.DataFrame:
+    # Every position at the reference date with a complete key and a valid
+    # ISIN, duplicates included: matching is a membership test (rule 4).
+    key = ctx.config.keys["cashflow_to_position"]
+    positions = data.positions
+    return positions[valid_isin(positions, ctx) & positions[list(key)].notna().all(axis=1)]
+
+
+def matches_a_position(data: InputData, ctx: Context) -> pd.Series:
+    key = ctx.config.keys["cashflow_to_position"]
+    held = pd.MultiIndex.from_frame(matching_positions(data, ctx)[list(key)])
     cashflow_keys = pd.MultiIndex.from_frame(data.cashflows[list(key)])
     return pd.Series(cashflow_keys.isin(held), index=data.cashflows.index)
 
 
-def with_security_name(data: InputData, rows: pd.DataFrame, key: tuple[str, ...]) -> pd.DataFrame:
+def with_security_name(data: InputData, rows: pd.DataFrame, ctx: Context) -> pd.DataFrame:
     # Cashflows have no SecurityName: take it from the matching position,
     # empty when there is none (output_spec.md section 1).
-    names = (positions_with_key(data, key)
+    key = ctx.config.keys["cashflow_to_position"]
+    names = (matching_positions(data, ctx)
              .drop_duplicates(list(key))
              .set_index(list(key))["SecurityName"])
     looked_up = [names.get(values) for values in key_tuples(rows, key)]
@@ -97,5 +118,5 @@ def key_tuples(frame: pd.DataFrame, key: tuple[str, ...]) -> list[tuple]:
     return [tuple(values) for values in frame[list(key)].itertuples(index=False)]
 
 
-def key_text(rows: pd.DataFrame, key: tuple[str, ...]) -> pd.Series:
+def key_text(rows: pd.DataFrame, key: tuple[str, ...]) -> pd.Series | None:
     return rows[list(key)].astype(str).agg("+".join, axis=1) if not rows.empty else None

@@ -4,6 +4,7 @@ import pandas as pd
 
 from dq.analytics import USABLE, previous_price_by_position, price_change_pct
 from dq.context import Context
+from dq.controls.common import duplicate_candidates, evaluated_rows, valid_isin
 from dq.exceptions import make_duplicate_exceptions, make_exceptions
 from dq.loaders import InputData
 
@@ -13,7 +14,8 @@ def check_no_price_history(data: InputData, ctx: Context) -> pd.DataFrame:
     # but cannot be used are reported by their own date or value control.
     positions = data.positions
     priced = data.previous_prices["ISIN"].dropna()
-    new = positions["ISIN"].notna() & ~positions["ISIN"].isin(priced)  # rule 1
+    new = (evaluated_rows(data, "positions", ctx) & valid_isin(positions, ctx)  # rule 1
+           & ~positions["ISIN"].isin(priced))
     return make_exceptions(
         positions[new], "NO_PRICE_HISTORY", ctx, "positions", "ISIN",
         comment="No previous price for this security (new security): no price movement "
@@ -29,7 +31,8 @@ def check_price_move_above_threshold(data: InputData, ctx: Context) -> pd.DataFr
     threshold = positions["AssetType"].map(ctx.config.price_move_thresholds_pct)
     # Rule 7: no movement when a price is missing or <= 0, or when the
     # previous price is unusable; no threshold for an unknown AssetType.
-    computable = ((previous["PreviousPriceStatus"] == USABLE)
+    computable = (evaluated_rows(data, "positions", ctx) & valid_isin(positions, ctx)
+                  & (previous["PreviousPriceStatus"] == USABLE)
                   & (market_price > 0) & (previous_price > 0) & threshold.notna())
     change = price_change_pct(market_price, previous_price)
     alert = computable & (change.abs() > threshold)
@@ -49,12 +52,11 @@ def check_price_move_above_threshold(data: InputData, ctx: Context) -> pd.DataFr
 
 def check_duplicate_previous_price(data: InputData, ctx: Context) -> pd.DataFrame:
     # Prices of securities not held are ignored (data_spec.md section 2).
-    key = ctx.config.keys["previous_price_unique"]
-    prices = data.previous_prices
-    held = prices["ISIN"].isin(data.positions["ISIN"].dropna())
-    complete = prices[list(key)].notna().all(axis=1)
-    return make_duplicate_exceptions(prices[held & complete], key, "DUPLICATE_PREVIOUS_PRICE",
-                                     ctx, "previous_prices", note=describe_prices)
+    candidates = duplicate_candidates(data, "previous_prices", ctx)
+    return make_duplicate_exceptions(data.previous_prices[candidates],
+                                     ctx.config.keys["previous_price_unique"],
+                                     "DUPLICATE_PREVIOUS_PRICE", ctx, "previous_prices",
+                                     note=describe_prices)
 
 
 def describe_prices(group: pd.DataFrame) -> str:

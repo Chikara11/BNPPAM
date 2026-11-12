@@ -4,6 +4,7 @@ import pandas as pd
 
 from dq.config import COLUMN_TYPES, load_config
 from dq.context import build_context
+from dq.engine import run
 from dq.loaders import InputData, empty_parse_issues
 
 # Small hand-built inputs for the unit tests, with the loader's columns and dtypes.
@@ -72,3 +73,9 @@ def price(**changes) -> dict:
 
 def cashflow(**changes) -> dict:
     return {**CASHFLOW, **changes}
+
+
+def raised(data: InputData, config=CONFIG) -> list[tuple]:
+    # Every exception of a full engine run, as (ControlID, Source, Field).
+    exceptions = run(data, config).exceptions
+    return sorted(zip(exceptions["ControlID"], exceptions["Source"], exceptions["Field"]))

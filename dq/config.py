@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import copy
 import datetime
+import re
 from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
@@ -36,7 +37,7 @@ COLUMN_TYPES = {
 }
 
 TOP_LEVEL_KEYS = (
-    "reference_date", "cashflow_horizon_days", "price_move_thresholds_pct",
+    "reference_date", "cashflow_horizon_days", "isin_pattern", "price_move_thresholds_pct",
     "rating_required_for", "allowed_values", "required_columns", "keys", "controls",
 )
 
@@ -64,6 +65,7 @@ class ControlSettings:
 class Config:
     reference_date: pd.Timestamp | None
     cashflow_horizon_days: int
+    isin_pattern: str
     price_move_thresholds_pct: Mapping[str, float]
     rating_required_for: tuple[str, ...]
     allowed_values: Mapping[str, tuple[str, ...]]
@@ -92,6 +94,7 @@ def config_from_dict(raw: dict) -> Config:
     return Config(
         reference_date=parse_reference_date(raw["reference_date"]),
         cashflow_horizon_days=raw["cashflow_horizon_days"],
+        isin_pattern=raw["isin_pattern"],
         price_move_thresholds_pct=MappingProxyType(
             {asset_type: float(value)
              for asset_type, value in raw["price_move_thresholds_pct"].items()}),
@@ -121,6 +124,7 @@ def validate_config(raw: dict) -> None:
     problems = (
         check_reference_date(raw)
         + check_horizon(raw)
+        + check_isin_pattern(raw)
         + check_allowed_values(raw)
         + check_thresholds(raw)
         + check_rating_required_for(raw)
@@ -144,6 +148,17 @@ def check_horizon(raw: dict) -> list[str]:
     value = raw["cashflow_horizon_days"]
     if isinstance(value, bool) or not isinstance(value, int) or value < 0:
         return [f"cashflow_horizon_days must be a whole number >= 0 (got {value!r})."]
+    return []
+
+
+def check_isin_pattern(raw: dict) -> list[str]:
+    pattern = raw["isin_pattern"]
+    if not isinstance(pattern, str) or not pattern:
+        return [f"isin_pattern must be a non-empty regular expression (got {pattern!r})."]
+    try:
+        re.compile(pattern)
+    except re.error as error:
+        return [f"isin_pattern is not a valid regular expression: {error}."]
     return []
 
 

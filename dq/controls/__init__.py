@@ -5,7 +5,7 @@ from collections.abc import Callable
 import pandas as pd
 
 from dq.context import Context
-from dq.controls import cashflows, positions, prices
+from dq.controls import cashflows, common, positions, prices
 from dq.loaders import InputData
 
 # Every control of config.yaml must be here and the reverse (engine.check_registry).
@@ -22,4 +22,7 @@ CONTROL_REGISTRY: dict[str, Callable[[InputData, Context], pd.DataFrame]] = {
     "DUPLICATE_CASHFLOW": cashflows.check_duplicate_cashflow,
     "PAST_FORECAST_CASHFLOW": cashflows.check_past_forecast_cashflow,
     "CURRENCY_MISMATCH": cashflows.check_currency_mismatch,
+    "INVALID_VALUE": common.check_invalid_value,
+    "MISSING_VALUE": common.check_missing_value,
+    "INVALID_PRICE": common.check_invalid_price,
 }

@@ -27,6 +27,7 @@ def test_real_config_loads(raw_yaml):
     config = load_config(CONFIG_PATH)
     assert config.reference_date is None
     assert config.cashflow_horizon_days == 30
+    assert config.isin_pattern == r"^SYN\d{9}$"
     assert config.price_move_thresholds_pct == {"CLO Debt": 5.0, "ABS": 5.0, "CLO Equity": 15.0}
     assert config.rating_required_for == ("CLO Debt", "ABS")
     assert config.keys["position_unique"] == ("ValuationDate", "Portfolio", "ISIN")
@@ -132,6 +133,10 @@ def break_missing_required_file(raw):
     del raw["required_columns"]["cashflows"]
 
 
+def break_isin_pattern(raw):
+    raw["isin_pattern"] = "^SYN[0-9"
+
+
 def break_required_column_without_type(raw):
     raw["required_columns"]["positions"].append("Seniority")
 
@@ -150,6 +155,7 @@ def break_required_column_without_type(raw):
     (break_missing_top_level, "keys"),
     (break_missing_required_file, "required_columns.cashflows"),
     (break_required_column_without_type, "Seniority has no type"),
+    (break_isin_pattern, "isin_pattern"),
 ])
 def test_invalid_config_raises_a_clear_error(raw, breaker, named):
     breaker(raw)

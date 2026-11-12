@@ -1,12 +1,13 @@
 import pytest
 
-from dq.config import with_overrides
+from dq.config import COLUMN_TYPES, with_overrides
 from dq.context import build_context, positions_at_reference_date
 from dq.controls import cashflows as cashflow_controls
+from dq.controls import common as common_controls
 from dq.controls import positions as position_controls
 from dq.controls import prices as price_controls
 from helpers import (CONFIG, EMPTY_POSITION, cashflow, check, make_data, parse_issue,
-                     position, price)
+                     position, price, raised)
 
 
 def test_missing_isin_fires():
@@ -302,3 +303,173 @@ def test_currency_mismatch_fires_on_a_matched_cashflow():
 def test_currency_mismatch_does_not_fire(changes):
     data = make_data(cashflows=[cashflow(**changes)])
     assert check(cashflow_controls.check_currency_mismatch, data).empty
+
+
+def test_small_clean_dataset_raises_nothing():
+    assert raised(make_data()) == []
+
+
+def test_zero_market_price_is_invalid_price_only():
+    assert raised(make_data([position(MarketPrice=0.0)])) == [
+        ("INVALID_PRICE", "positions", "MarketPrice")]
+
+
+def test_empty_nominal_is_missing_value_only():
+    assert raised(make_data([position(Nominal=None)])) == [
+        ("MISSING_VALUE", "positions", "Nominal")]
+
+
+@pytest.mark.parametrize("maturity", ["2026-11-01", "2026-11-11"])
+def test_maturity_on_or_before_the_reference_date_is_invalid_value_only(maturity):
+    data = make_data([position(MaturityDate=maturity)], cashflows=[])
+    assert raised(data) == [("INVALID_VALUE", "positions", "MaturityDate")]
+
+
+def test_empty_rating_on_clo_debt_is_missing_rating_only():
+    assert raised(make_data([position(Rating=None)])) == [
+        ("MISSING_RATING", "positions", "Rating")]
+
+
+def test_empty_rating_on_clo_equity_raises_nothing():
+    assert raised(make_data([position(AssetType="CLO Equity", Rating=None)])) == []
+
+
+@pytest.mark.parametrize("data, expected", [
+    (make_data([position(BookPrice=None)]), ("MISSING_VALUE", "positions", "BookPrice")),
+    (make_data(previous_prices=[price(PreviousPrice=None)]),
+     ("MISSING_VALUE", "previous_prices", "PreviousPrice")),
+    (make_data(cashflows=[cashflow(Amount=None)]), ("MISSING_VALUE", "cashflows", "Amount")),
+    (make_data(previous_prices=[price(), price(ISIN=None, PreviousPrice=-1.0)]),
+     ("MISSING_VALUE", "previous_prices", "ISIN")),
+])
+def test_missing_value_fires_alone_in_each_file(data, expected):
+    assert raised(data) == [expected]
+
+
+def test_missing_value_ignores_cells_with_a_dedicated_control():
+    exceptions = check(common_controls.check_missing_value,
+                       make_data([position(ISIN=None, MarketPrice=None, Rating=None)]))
+    assert exceptions.empty
+
+
+def test_unparseable_cell_is_invalid_value_only_with_the_raw_text():
+    data = make_data([position(Nominal=None)],
+                     parse_issues=parse_issue("positions", 2, "Nominal", "5,000,000"))
+    exceptions = check(common_controls.check_invalid_value, data)
+    assert exceptions[["Field", "ObservedValue"]].values.tolist() == [["Nominal", "5,000,000"]]
+    assert raised(data) == [("INVALID_VALUE", "positions", "Nominal")]
+
+
+@pytest.mark.parametrize("file", ["positions", "previous_prices", "cashflows"])
+def test_empty_row_is_reported_once_in_every_file(file):
+    empty = {column: None for column in COLUMN_TYPES[file]}
+    rows = {"positions": [position(), empty], "previous_prices": [price(), empty],
+            "cashflows": [cashflow(), empty]}
+    data = make_data(**{file: rows[file]})
+    exceptions = check(common_controls.check_invalid_value, data)
+    assert exceptions[["Field", "Comment", "SourceRow"]].values.tolist() == [["row", "Empty row", 3]]
+    assert raised(data) == [("INVALID_VALUE", file, "row")]
+
+
+@pytest.mark.parametrize("data, expected", [
+    (make_data([position(Rating="AA+")]), ("INVALID_VALUE", "positions", "Rating")),
+    (make_data(cashflows=[cashflow(Currency=" EUR")]), ("INVALID_VALUE", "cashflows", "Currency")),
+    (make_data(cashflows=[cashflow(Portfolio="CLO_EURO_99")]),
+     ("INVALID_VALUE", "cashflows", "Portfolio")),
+    (make_data(previous_prices=[price(PriceSource="Bloomberg")]),
+     ("INVALID_VALUE", "previous_prices", "PriceSource")),
+])
+def test_value_outside_the_allowed_list_is_invalid_value_only(data, expected):
+    # No CURRENCY_MISMATCH on " EUR", no UNMATCHED_CASHFLOW on an unknown portfolio.
+    assert raised(data) == [expected]
+
+
+@pytest.mark.parametrize("data, expected", [
+    (make_data([position(ISIN="SYN00000001")], previous_prices=[], cashflows=[]),
+     ("INVALID_VALUE", "positions", "ISIN")),
+    (make_data(cashflows=[cashflow(), cashflow(ISIN="syn000000001", Currency="USD")]),
+     ("INVALID_VALUE", "cashflows", "ISIN")),
+    (make_data(previous_prices=[price(), price(ISIN="SYN000000001 ", PreviousPrice=0.0)]),
+     ("INVALID_VALUE", "previous_prices", "ISIN")),
+])
+def test_badly_formatted_isin_is_invalid_value_only(data, expected):
+    # Rule 1: no NO_PRICE_HISTORY, UNMATCHED_CASHFLOW, CURRENCY_MISMATCH or
+    # INVALID_PRICE on the row.
+    assert raised(data) == [expected]
+
+
+def test_cashflow_after_the_maturity_of_its_position_is_invalid_value_only():
+    data = make_data(cashflows=[cashflow(CashflowDate="2036-04-16")])
+    exceptions = check(common_controls.check_invalid_value, data)
+    assert exceptions["Comment"].tolist() == [
+        "CashflowDate is after the MaturityDate of its position (2036-04-15)."]
+    assert raised(data) == [("INVALID_VALUE", "cashflows", "CashflowDate")]
+
+
+def test_cashflow_on_the_maturity_date_is_valid():
+    assert raised(make_data(cashflows=[cashflow(CashflowDate="2036-04-15")])) == []
+
+
+def test_unmatched_cashflow_is_not_compared_with_a_maturity():
+    data = make_data(cashflows=[cashflow(ISIN="SYN999999999", CashflowDate="2040-01-01")])
+    assert raised(data) == [("UNMATCHED_CASHFLOW", "cashflows", "Portfolio+ISIN")]
+
+
+@pytest.mark.parametrize("previous_date", ["2026-11-11", "2026-11-20"])
+def test_previous_date_on_or_after_the_reference_date_is_invalid_value_only(previous_date):
+    # The security still has a price row, so no NO_PRICE_HISTORY.
+    data = make_data(previous_prices=[price(PreviousDate=previous_date)])
+    assert raised(data) == [("INVALID_VALUE", "previous_prices", "PreviousDate")]
+
+
+def test_prices_of_securities_not_held_are_ignored():
+    data = make_data(previous_prices=[price(), price(ISIN="SYN000000099", PreviousPrice=-1.0,
+                                                     PreviousDate="2026-12-01")])
+    assert raised(data) == []
+
+
+def test_invalid_price_fires_once_per_field():
+    data = make_data([position(MarketPrice=-1.0, BookPrice=0.0)])
+    exceptions = check(common_controls.check_invalid_price, data)
+    assert exceptions[["Field", "ObservedValue"]].values.tolist() == [
+        ["MarketPrice", "-1"], ["BookPrice", "0"]]
+
+
+def test_invalid_previous_price_fires():
+    data = make_data(previous_prices=[price(PreviousPrice=0.0)])
+    assert raised(data) == [("INVALID_PRICE", "previous_prices", "PreviousPrice")]
+
+
+@pytest.mark.parametrize("book_price", [None, 0.01])
+def test_invalid_price_does_not_fire_on_empty_or_positive(book_price):
+    data = make_data([position(BookPrice=book_price)])
+    assert check(common_controls.check_invalid_price, data).empty
+
+
+def test_duplicated_past_forecast_cashflow_gives_one_of_each():
+    # Rule 12: only the duplicate control sees the repeated row.
+    past = cashflow(CashflowDate="2026-11-06", Status="Forecast")
+    assert raised(make_data(cashflows=[past, past])) == [
+        ("DUPLICATE_CASHFLOW", "cashflows", "Portfolio+ISIN+CashflowDate+CashflowType+Amount"),
+        ("PAST_FORECAST_CASHFLOW", "cashflows", "CashflowDate")]
+
+
+def test_duplicated_position_with_a_negative_nominal_gives_one_of_each():
+    bad = position(Nominal=-1.0)
+    assert raised(make_data([bad, bad])) == [
+        ("DUPLICATE_POSITION", "positions", "ValuationDate+Portfolio+ISIN"),
+        ("INVALID_NOMINAL", "positions", "Nominal")]
+
+
+def test_duplicated_previous_price_with_a_zero_price_gives_one_of_each():
+    zero = price(PreviousPrice=0.0)
+    assert raised(make_data(previous_prices=[zero, zero])) == [
+        ("DUPLICATE_PREVIOUS_PRICE", "previous_prices", "ISIN+PreviousDate"),
+        ("INVALID_PRICE", "previous_prices", "PreviousPrice")]
+
+
+def test_repeated_rows_with_a_bad_isin_are_each_evaluated():
+    # Not compared by the duplicate control, so rule 12 does not hide them.
+    bad = position(ISIN="SYN1")
+    data = make_data([bad, bad], previous_prices=[], cashflows=[])
+    assert raised(data) == [("INVALID_VALUE", "positions", "ISIN")] * 2

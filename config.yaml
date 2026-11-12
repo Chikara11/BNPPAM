@@ -11,6 +11,11 @@ reference_date: null
 # Upcoming cashflows: from the reference date to reference date + N days (inclusive).
 cashflow_horizon_days: 30
 
+# Format of a valid identifier (docs/data_spec.md): SYN + 9 digits, full match.
+# A present ISIN that does not match is INVALID_VALUE and is treated like a
+# missing ISIN (CLAUDE.md exception rule 1).
+isin_pattern: '^SYN\d{9}$'
+
 # Price movement thresholds, in % of the previous price (absolute movement).
 # An alert is raised when |PriceChangePct| is STRICTLY GREATER than the threshold.
 price_move_thresholds_pct:

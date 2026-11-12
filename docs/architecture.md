@@ -232,7 +232,10 @@ Rules for a control:
   number. The same applies to analytics, the report and the app.
 
 Placement:
-- `controls/common.py`: MISSING_VALUE, INVALID_VALUE, INVALID_PRICE;
+- `controls/common.py`: MISSING_VALUE, INVALID_VALUE, INVALID_PRICE, and the
+  row-scope helpers every control uses: `valid_isin` (rule 1),
+  `duplicate_candidates` / `first_occurrence` (rule 12) and `evaluated_rows`
+  (rules 1, 11, 12; for previous prices, securities held only);
 - `controls/cashflows.py`: UNMATCHED_CASHFLOW, CURRENCY_MISMATCH and the
   other cashflow controls (DUPLICATE_CASHFLOW, PAST_FORECAST_CASHFLOW);
 - `controls/prices.py`: price controls (PRICE_MOVE_ABOVE_THRESHOLD,

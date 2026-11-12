@@ -71,3 +71,10 @@ def make_duplicate_exceptions(frame: pd.DataFrame, key: tuple[str, ...], control
     return make_exceptions(rows, control_id, ctx, file, "+".join(key),
                            observed=pd.Series(observed, index=rows.index),
                            comment=pd.Series(comments, index=rows.index))
+
+
+def combine_exceptions(frames: list[pd.DataFrame]) -> pd.DataFrame:
+    found = [frame for frame in frames if not frame.empty]
+    if not found:
+        return empty_exceptions()
+    return conform(pd.concat(found, ignore_index=True), EXCEPTION_COLUMNS)

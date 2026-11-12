@@ -32,8 +32,10 @@ def latest_previous_prices(data: InputData, ctx: Context) -> pd.DataFrame:
         DistinctPrices=("PreviousPrice", lambda values: values.nunique(dropna=False)),
     )
     result = pd.DataFrame(index=pd.Index(prices["ISIN"].unique(), name="ISIN"))
-    result = result.join(latest)
-    result["PreviousPriceStatus"] = USABLE
+    # explicit dtypes: an empty previous_prices file gives untyped columns
+    result = result.join(latest).astype({"PreviousDate": "datetime64[us]",
+                                         "PreviousPrice": "float64"})
+    result["PreviousPriceStatus"] = pd.Series(USABLE, index=result.index, dtype=object)
     result.loc[result["PreviousDate"].isna(), "PreviousPriceStatus"] = NO_USABLE_PRICE
     conflicting = result["DistinctPrices"] > 1
     result.loc[conflicting, "PreviousPriceStatus"] = CONFLICTING_PRICES
@@ -45,11 +47,11 @@ def previous_price_by_position(data: InputData, ctx: Context) -> pd.DataFrame:
     # Aligned on the positions: PreviousDate, PreviousPrice, PreviousPriceStatus.
     positions = data.positions
     latest = latest_previous_prices(data, ctx)
-    result = pd.DataFrame({
-        "PreviousDate": positions["ISIN"].map(latest["PreviousDate"]).astype("datetime64[us]"),
-        "PreviousPrice": positions["ISIN"].map(latest["PreviousPrice"]).astype("float64"),
-        "PreviousPriceStatus": positions["ISIN"].map(latest["PreviousPriceStatus"]),
-    }, index=positions.index)
+    # reindex rather than Series.map: map fails on an empty datetime lookup
+    result = latest.reindex(positions["ISIN"].to_numpy()).astype(
+        {"PreviousDate": "datetime64[us]", "PreviousPrice": "float64",
+         "PreviousPriceStatus": object})
+    result.index = positions.index
     result.loc[result["PreviousPriceStatus"].isna(), "PreviousPriceStatus"] = NO_PRICE_HISTORY
     result.loc[positions["ISIN"].isna(), "PreviousPriceStatus"] = MISSING_ISIN
     return result
