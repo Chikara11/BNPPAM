@@ -81,6 +81,10 @@ controls:
     enabled: true
     severity: Information
     label: New security without price history
+  DUPLICATE_PREVIOUS_PRICE:
+    enabled: true
+    severity: Warning
+    label: Duplicate previous price
   UNMATCHED_CASHFLOW:
     enabled: true
     severity: Warning

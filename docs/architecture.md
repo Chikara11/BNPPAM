@@ -236,7 +236,7 @@ Placement:
 - `controls/cashflows.py`: UNMATCHED_CASHFLOW, CURRENCY_MISMATCH and the
   other cashflow controls (DUPLICATE_CASHFLOW, PAST_FORECAST_CASHFLOW);
 - `controls/prices.py`: price controls (PRICE_MOVE_ABOVE_THRESHOLD,
-  NO_PRICE_HISTORY);
+  NO_PRICE_HISTORY, DUPLICATE_PREVIOUS_PRICE);
 - `controls/positions.py`: the rest (MISSING_ISIN, DUPLICATE_POSITION,
   MISSING_MARKET_PRICE, INVALID_NOMINAL, MISSING_RATING).
 

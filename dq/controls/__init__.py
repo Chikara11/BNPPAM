@@ -5,7 +5,7 @@ from collections.abc import Callable
 import pandas as pd
 
 from dq.context import Context
-from dq.controls import positions
+from dq.controls import positions, prices
 from dq.loaders import InputData
 
 # Every control of config.yaml must be here and the reverse (engine.check_registry).
@@ -15,4 +15,7 @@ CONTROL_REGISTRY: dict[str, Callable[[InputData, Context], pd.DataFrame]] = {
     "MISSING_MARKET_PRICE": positions.check_missing_market_price,
     "INVALID_NOMINAL": positions.check_invalid_nominal,
     "MISSING_RATING": positions.check_missing_rating,
+    "PRICE_MOVE_ABOVE_THRESHOLD": prices.check_price_move_above_threshold,
+    "NO_PRICE_HISTORY": prices.check_no_price_history,
+    "DUPLICATE_PREVIOUS_PRICE": prices.check_duplicate_previous_price,
 }

@@ -6,6 +6,7 @@ import pytest
 from dq.config import COLUMN_TYPES, load_config, with_overrides
 from dq.context import build_context
 from dq.controls import positions as position_controls
+from dq.controls import prices as price_controls
 from dq.loaders import InputData, empty_parse_issues
 
 CONFIG = load_config(Path(__file__).resolve().parent.parent / "config.yaml")
@@ -161,3 +162,108 @@ def test_missing_rating_follows_the_config():
     config = with_overrides(CONFIG, {"rating_required_for": ["ABS"]})
     data = make_data([position(AssetType="CLO Debt", Rating=None)])
     assert check(position_controls.check_missing_rating, data, config).empty
+
+
+def price(**changes) -> dict:
+    return {**PREVIOUS_PRICE, **changes}
+
+
+def test_no_price_history_fires_when_the_isin_has_no_price_row():
+    data = make_data([position(ISIN="SYN000000002")])
+    exceptions = check(price_controls.check_no_price_history, data)
+    assert exceptions[["ControlID", "Severity", "ISIN"]].values.tolist() == [
+        ["NO_PRICE_HISTORY", "Information", "SYN000000002"]]
+
+
+@pytest.mark.parametrize("previous_date", ["2026-11-11", "2026-12-01", None])
+def test_no_price_history_does_not_fire_when_unusable_rows_exist(previous_date):
+    # The bad or empty date is reported by its own control, not here.
+    data = make_data(previous_prices=[price(PreviousDate=previous_date)])
+    assert check(price_controls.check_no_price_history, data).empty
+
+
+def test_no_price_history_skips_a_position_without_isin():
+    data = make_data([position(ISIN=None)])
+    assert check(price_controls.check_no_price_history, data).empty
+
+
+def test_price_move_fires_above_the_threshold():
+    data = make_data([position(MarketPrice=91.0)], [price(PreviousPrice=98.0)])
+    exceptions = check(price_controls.check_price_move_above_threshold, data)
+    exception = exceptions.iloc[0]
+    assert len(exceptions) == 1
+    assert (exception["Source"], exception["Field"]) == ("positions", "MarketPrice")
+    assert exception["ObservedValue"] == "-7.142857"
+    assert "-7.14 %" in exception["Comment"] and "5 % threshold for CLO Debt" in exception["Comment"]
+
+
+def test_price_move_does_not_fire_below_the_threshold():
+    data = make_data([position(MarketPrice=96.0)], [price(PreviousPrice=98.0)])
+    assert check(price_controls.check_price_move_above_threshold, data).empty
+
+
+def test_price_move_uses_the_latest_price_strictly_before_the_reference_date():
+    prices = [price(PreviousDate="2026-10-28", PreviousPrice=100.0),
+              price(PreviousDate="2026-11-04", PreviousPrice=92.0),
+              price(PreviousDate="2026-11-11", PreviousPrice=50.0)]  # on the reference date: ignored
+    data = make_data([position(MarketPrice=92.0)], prices)
+    assert check(price_controls.check_price_move_above_threshold, data).empty
+
+
+@pytest.mark.parametrize("latest_price", [None, 0.0, -5.0])
+def test_price_move_has_no_fallback_to_an_older_price(latest_price):
+    # Rule 7: the latest price is unusable, the older one is not used.
+    prices = [price(PreviousDate="2026-10-28", PreviousPrice=50.0),
+              price(PreviousDate="2026-11-04", PreviousPrice=latest_price)]
+    data = make_data([position(MarketPrice=98.0)], prices)
+    assert check(price_controls.check_price_move_above_threshold, data).empty
+
+
+@pytest.mark.parametrize("market_price", [None, 0.0, -1.5])
+def test_price_move_is_not_computed_without_a_valid_market_price(market_price):
+    data = make_data([position(MarketPrice=market_price)], [price(PreviousPrice=98.0)])
+    assert check(price_controls.check_price_move_above_threshold, data).empty
+
+
+@pytest.mark.parametrize("asset_type", [None, "Loan"])
+def test_price_move_needs_a_known_asset_type(asset_type):
+    data = make_data([position(AssetType=asset_type, MarketPrice=50.0)], [price()])
+    assert check(price_controls.check_price_move_above_threshold, data).empty
+
+
+def test_price_move_runs_on_each_portfolio_holding_the_isin():
+    data = make_data([position(MarketPrice=91.0), position(Portfolio="CLO_GLOBAL_02",
+                                                           MarketPrice=91.0)],
+                     [price(PreviousPrice=98.0)])
+    exceptions = check(price_controls.check_price_move_above_threshold, data)
+    assert exceptions["Portfolio"].tolist() == ["CLO_EURO_01", "CLO_GLOBAL_02"]
+
+
+def test_duplicate_previous_price_with_the_same_price_is_still_used():
+    data = make_data([position(MarketPrice=91.0)],
+                     [price(PreviousPrice=98.0), price(PreviousPrice=98.0)])
+    duplicates = check(price_controls.check_duplicate_previous_price, data)
+    assert duplicates[["ControlID", "Severity", "Source", "Field", "SourceRow"]].values.tolist() == [
+        ["DUPLICATE_PREVIOUS_PRICE", "Warning", "previous_prices", "ISIN+PreviousDate", 2]]
+    assert "Same price on every row" in duplicates.iloc[0]["Comment"]
+    assert len(check(price_controls.check_price_move_above_threshold, data)) == 1
+
+
+def test_duplicate_previous_price_with_different_prices_blocks_the_movement():
+    data = make_data([position(MarketPrice=91.0)],
+                     [price(PreviousPrice=98.0), price(PreviousPrice=97.5)])
+    duplicates = check(price_controls.check_duplicate_previous_price, data)
+    assert len(duplicates) == 1
+    assert "Prices differ (98, 97.5)" in duplicates.iloc[0]["Comment"]
+    assert check(price_controls.check_price_move_above_threshold, data).empty
+
+
+def test_duplicate_previous_price_does_not_fire_on_different_dates():
+    data = make_data(previous_prices=[price(), price(PreviousDate="2026-10-28")])
+    assert check(price_controls.check_duplicate_previous_price, data).empty
+
+
+def test_duplicate_previous_price_ignores_securities_not_held():
+    data = make_data(previous_prices=[price(), price(ISIN="SYN000000099"),
+                                      price(ISIN="SYN000000099")])
+    assert check(price_controls.check_duplicate_previous_price, data).empty

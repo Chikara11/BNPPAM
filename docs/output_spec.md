@@ -90,7 +90,9 @@ cannot be computed.
 
 **[Decision]** `MoveStatus` vocabulary (exactly one per row):
 `Computed`, `Missing ISIN`, `No price history`, `Missing market price`,
-`Invalid market price`, `Invalid previous price`.
+`Invalid market price`, `Invalid previous price`, `Conflicting previous prices`
+(several different prices on the latest PreviousDate), `No usable previous price`
+(rows exist but none has a valid PreviousDate before the reference date).
 
 Sort order: Breach (True first), abs(PriceChangePct) descending, Portfolio, ISIN.
 

@@ -5,7 +5,8 @@ import pytest
 
 # TEMPORARY: grows with each control. Once every control is registered, the
 # test runs on every manifest case and this set is removed.
-IMPLEMENTED_CASES = {"A01", "A02", "A03", "A04", "A09", "A10"}
+IMPLEMENTED_CASES = {"A01", "A02", "A03", "A04", "A05", "A06", "A07", "A08", "A09", "A10",
+                     "N01", "N02"}
 
 
 def manifest_case(manifest: pd.DataFrame, case_id: str) -> pd.Series:

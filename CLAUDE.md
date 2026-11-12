@@ -84,7 +84,10 @@ Detect:
 - Missing current market prices.
 - Invalid or non-positive nominal and prices.
 - Missing ratings where a rating is expected (CLO Debt, ABS).
-- Securities without previous pricing history.
+- Securities without previous pricing history: no previous_prices row at
+  all for the ISIN. Rows that exist but are unusable (empty, unparseable or
+  future PreviousDate) are reported only by their own date control.
+- Duplicate previous prices (key: ISIN + PreviousDate), on securities held.
 - Asset-specific price movements above thresholds.
 - Cashflows without a matching position (key: Portfolio + ISIN).
 - Duplicate cashflows (key: Portfolio + ISIN + CashflowDate + CashflowType + Amount).
@@ -120,14 +123,17 @@ The engine follows these rules:
    it never joins row by row, so a duplicated position does not duplicate
    cashflows. Reports state that a duplicated position is counted twice
    in totals.
-5. Duplicates (positions, cashflows) raise one exception per duplicated
-   key, not one per row.
+5. Duplicates (positions, previous prices, cashflows) raise one exception
+   per duplicated key, not one per row.
 6. CURRENCY_MISMATCH is checked only on cashflows that match a position.
 7. PriceChangePct = (MarketPrice - PreviousPrice) / PreviousPrice * 100,
    in this order, rounded to 6 decimals before the comparison with the
    threshold (so that exactly 5 % never triggers through a floating-point
    residue). No movement is computed when MarketPrice or the latest
    PreviousPrice is missing or <= 0 (no fallback to an older price).
+   When the latest PreviousDate has several rows (DUPLICATE_PREVIOUS_PRICE),
+   the movement uses their price if it is the same on every row, and is not
+   computed if the prices differ.
 8. INVALID_PRICE covers MarketPrice, BookPrice and PreviousPrice <= 0:
    one exception per invalid field, with the field named in the Field
    column of the exception.
@@ -161,6 +167,7 @@ Warning:
 - Significant price movement.
 - Missing expected rating.
 - Unmatched or duplicate cashflow.
+- Duplicate previous price (DUPLICATE_PREVIOUS_PRICE).
 - Past-dated Forecast cashflow.
 - Other required value missing (MISSING_VALUE).
 - Value outside an allowed list, or invalid date (INVALID_VALUE).

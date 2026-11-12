@@ -37,7 +37,7 @@ def test_real_config_loads(raw_yaml):
 def test_controls_keep_the_yaml_order(raw_yaml):
     config = load_config(CONFIG_PATH)
     assert list(config.controls) == list(raw_yaml["controls"])
-    assert len(config.controls) == 14
+    assert len(config.controls) == 15
 
 
 @pytest.mark.parametrize("value", ["2026-11-11", datetime.date(2026, 11, 11),

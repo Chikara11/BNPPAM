@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import datetime
+from collections.abc import Callable
 from typing import Any
 
 import pandas as pd
@@ -50,8 +51,10 @@ def as_text(value: Any) -> str | None:
 
 
 def make_duplicate_exceptions(frame: pd.DataFrame, key: tuple[str, ...], control_id: str,
-                              ctx: Context, file: str, note: str = "") -> pd.DataFrame:
+                              ctx: Context, file: str,
+                              note: str | Callable[[pd.DataFrame], str] = "") -> pd.DataFrame:
     # One exception per duplicated key (rule 5), raised on its first row.
+    # note is added to the Comment; a function gets the rows of the key.
     duplicated = frame[frame.duplicated(list(key), keep=False)]
     if duplicated.empty:
         return empty_exceptions()
@@ -59,10 +62,11 @@ def make_duplicate_exceptions(frame: pd.DataFrame, key: tuple[str, ...], control
     for _, group in duplicated.groupby(list(key), sort=False, dropna=False):
         group = group.sort_values("SourceRow")
         source_rows = ", ".join(str(row) for row in group["SourceRow"])
+        text = note(group) if callable(note) else note
         first_labels.append(group.index[0])
         observed.append("+".join(as_text(value) for value in group.iloc[0][list(key)]))
         comments.append(f"Same {' + '.join(key)} on {len(group)} rows (Excel rows "
-                        f"{source_rows}).{' ' + note if note else ''}")
+                        f"{source_rows}).{' ' + text if text else ''}")
     rows = frame.loc[first_labels]
     return make_exceptions(rows, control_id, ctx, file, "+".join(key),
                            observed=pd.Series(observed, index=rows.index),
