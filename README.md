@@ -5,6 +5,18 @@ Data quality and price monitoring of CLO Debt, CLO Equity and ABS positions:
 report and a Streamlit app. All data is synthetic (identifiers `SYN` + 9
 digits); no real portfolio or market data.
 
+## Deliverables
+
+| Item of the brief | Location |
+|---|---|
+| 3 input Excel files | `data/inputs/` (test fixture), `data/large/` (large sample) |
+| Python source | `dq/`, `scripts/`, `tests/` |
+| Streamlit app | `app.py`; deployed URL: see [Deployed app](#deployed-app) (to be added) |
+| Generated Excel report | `docs/sample_report.xlsx`, `docs/sample_report_large.xlsx` |
+| README (how it works, assumptions, limits) | this file |
+| AI usage note and prompts | [AI_USAGE.md](AI_USAGE.md), [docs/adversarial_review.md](docs/adversarial_review.md) |
+| Injected anomalies and expected results | [docs/anomalies.md](docs/anomalies.md) (readable), `docs/anomaly_manifest.xlsx` and `docs/large_manifest.xlsx` (test oracles) |
+
 ## Run locally
 
 Python 3.12, from the repo root:
@@ -46,6 +58,59 @@ anything: `docs/sample_report.xlsx` (test fixture) and
 equal a fresh run; regenerate them with
 `python -m scripts.run_report --inputs data/inputs --output docs/sample_report.xlsx`
 (and `data/large` -> `docs/sample_report_large.xlsx`).
+
+## How it works
+
+1. **Inputs**: `positions.xlsx`, `previous_prices.xlsx`, `cashflows.xlsx`.
+2. **Loading** (`dq/loaders.py`): strict types (a text in a number column is
+   reported, never converted), required columns from `config.yaml` (a missing
+   one stops processing), one visible sheet, Excel row numbers kept.
+3. **Engine** (`dq/engine.py`): fixes the reference date (the single
+   valuation date) and runs the 15 controls of `config.yaml`, in that order;
+   each control is one function returning exceptions in a common format.
+4. **Analytics** (`dq/analytics.py`): price movements, upcoming cashflows,
+   data quality and the summary, all in one `Results` object.
+5. **Outputs**: the same `Results` feeds the Streamlit app (`app.py`) and the
+   Excel report (`dq/report.py`): they display, never recompute.
+
+To change a threshold, edit `config.yaml` (or use the app sidebar for one
+session). To add a control, follow `docs/architecture.md`, section 6.
+
+## Assumptions
+
+Business rules are in `CLAUDE.md` and `config.yaml`; the main assumptions:
+
+- **Cashflow horizon.** The brief names the sheet "Cashflows 3D"; it is read
+  as a 30-day horizon, consistent with "cashflows attendus au cours des 30
+  prochains jours". The horizon is configurable (`cashflow_horizon_days`,
+  0 to 3650, also in the app sidebar) and the sheet is named
+  "Cashflows {N}D" (default "Cashflows 30D"). Upcoming = from the reference
+  date to reference date + N days, both included, Status not Paid.
+- **One valuation date per file.** `positions.xlsx` must carry exactly one
+  valid ValuationDate; zero or several stop processing with a message
+  listing the dates found and their row counts.
+- **Reference date = valuation date.** `reference_date` in `config.yaml` is
+  optional; when set, it must equal the file's valuation date.
+- **Thresholds.** A price alert fires when |PriceChangePct| is strictly
+  greater than the threshold (5 % CLO Debt and ABS, 15 % CLO Equity):
+  exactly 5 % does not alert. The percentage is rounded to 6 decimals first.
+- **Prices and amounts.** Prices are per 100 nominal; MarketValue = Nominal x
+  MarketPrice / 100; amounts are totalled per currency, never converted.
+- **Invalid values never enter a total.** A Nominal or price that is empty or
+  <= 0, a currency outside the allowed list, or a cashflow with a missing or
+  invalid Status, Amount, Currency or CashflowType stays listed (and is
+  reported) but is excluded from the totals; the summary counts the excluded
+  cashflows.
+- **Plausibility = review alerts.** Large price moves are flagged for review,
+  not as data errors; they are counted with the other dimensions.
+- **Detect, never repair.** Duplicates, bad values and unmatched cashflows are
+  reported, never corrected or removed.
+
+## AI usage and review
+
+- [AI_USAGE.md](AI_USAGE.md): how AI assistance was used to build the prototype.
+- [docs/adversarial_review.md](docs/adversarial_review.md): the hostile review
+  of the finished application and what was fixed.
 
 ## Deployed app
 

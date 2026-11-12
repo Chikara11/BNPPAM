@@ -5,3 +5,6 @@ __pycache__/
 output/
 AI_LOG.md
 .DS_Store
+
+# Personal notes, never committed
+case_ai_prompts.md

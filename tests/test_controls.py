@@ -29,8 +29,8 @@ def test_duplicate_position_fires_once_per_key():
     assert exception["Field"] == "ValuationDate+Portfolio+ISIN"
     assert exception["ObservedValue"] == "2026-11-11+CLO_EURO_01+SYN000000001"
     assert "Excel rows 2, 3, 4" in exception["Comment"]
-    assert "counted twice" in exception["Comment"]
-    assert "Rows are identical." in exception["Comment"]
+    assert exception["Comment"].endswith("on 3 rows (Excel rows 2, 3, 4). Each row with valid "
+                                         "values is included in totals. Rows are identical.")
 
 
 def test_same_isin_in_two_portfolios_is_not_a_duplicate():
@@ -258,7 +258,6 @@ def test_duplicate_cashflow_fires_once_per_key():
     assert len(exceptions) == 1
     assert exceptions.iloc[0]["SourceRow"] == 2
     assert "Excel rows 2, 3" in exceptions.iloc[0]["Comment"]
-    assert exceptions.iloc[0]["SecurityName"] == "Aurora CLO 2023-1 B"
 
 
 @pytest.mark.parametrize("changes", [{"Amount": 75000.01}, {"CashflowType": "Principal"},

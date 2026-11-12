@@ -119,8 +119,11 @@ def write_data_quality(workbook: Workbook, results: Results) -> None:
     block = results.dimension_quality
     write_frame(sheet, block, 2)
     controls = block.columns.get_loc("Controls") + 1
-    for row in range(3, 3 + len(block)):  # long lists of control IDs wrap in the cell
-        sheet.cell(row=row, column=controls).alignment = WRAPPED
+    for row in range(3, 3 + len(block)):  # one control ID per line, so none is cut
+        cell = sheet.cell(row=row, column=controls)
+        if cell.value:
+            cell.value = cell.value.replace(", ", "\n")
+        cell.alignment = WRAPPED
     note_row = 2 + len(results.dimension_quality) + 1  # header on row 2, then the rows
     write_cell(sheet, note_row, 1, PLAUSIBILITY_NOTE).font = NOTE_FONT
     checks_row = note_row + 2
@@ -224,7 +227,9 @@ def highlight_rows(sheet: Worksheet, selected: pd.Series, fill: PatternFill) -> 
 def fit_columns(sheet: Worksheet, skip_rows: set[int] = frozenset()) -> None:
     # skip_rows: titles and notes that may run over the next columns.
     for cells in sheet.columns:
-        lengths = [DATE_WIDTH if isinstance(cell.value, datetime.datetime) else len(str(cell.value))
+        # the longest line of a cell: multi-line cells wrap (Controls)
+        lengths = [DATE_WIDTH if isinstance(cell.value, datetime.datetime)
+                   else max(len(line) for line in str(cell.value).splitlines())
                    for cell in cells if cell.value is not None and cell.row not in skip_rows]
         width = min(max(lengths, default=0) + 2, MAX_COLUMN_WIDTH)
         sheet.column_dimensions[cells[0].column_letter].width = width

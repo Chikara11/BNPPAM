@@ -19,9 +19,10 @@ def make_exceptions(rows: pd.DataFrame, control_id: str, ctx: Context, file: str
                     comment: str | pd.Series) -> pd.DataFrame:
     """Build one exception per row of `rows` in the common exception format.
 
-    Severity, Dimension and AnomalyType come from config.yaml; Portfolio, ISIN,
-    SecurityName and SourceRow from the row; `observed` (aligned on rows)
-    becomes ObservedValue as text. Returns output_spec.md section 1.
+    Severity, Dimension and AnomalyType come from config.yaml; Portfolio, ISIN
+    and SourceRow from the row (SecurityName and AssetType are added by the
+    engine); `observed` (aligned on rows) becomes ObservedValue as text.
+    Returns output_spec.md section 1.
     """
     if rows.empty:
         return empty_exceptions()
@@ -35,8 +36,9 @@ def make_exceptions(rows: pd.DataFrame, control_id: str, ctx: Context, file: str
         "Source": file,
         "Portfolio": column_or_empty(rows, "Portfolio"),
         "ISIN": column_or_empty(rows, "ISIN"),
-        "SecurityName": column_or_empty(rows, "SecurityName"),
-        "AssetType": None,  # filled by the engine, from the position (one place for 3 files)
+        # filled by the engine, from the position (one place for the 3 files)
+        "SecurityName": None,
+        "AssetType": None,
         "Field": field,
         "ObservedValue": None if observed is None else observed.map(as_text),
         "Comment": comment,

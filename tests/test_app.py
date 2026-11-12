@@ -4,6 +4,7 @@ import re
 
 import pandas as pd
 import pytest
+from streamlit.dataframe_util import convert_arrow_bytes_to_pandas_df
 from streamlit.testing.v1 import AppTest
 
 from dq.config import MAX_HORIZON_DAYS
@@ -44,6 +45,7 @@ def test_app_sample_shows_the_5_tabs_and_the_severity_counts():
     assert [tab.label for tab in app.tabs] == [
         "Summary", "Exceptions", "Price Movements", "Cashflows 30D", "Data Quality"]
     assert [(metric.label, metric.value) for metric in app.metric] == [
+        ("Positions analysed", "52"), ("Total exceptions", "15"),
         ("Critical", "6"), ("Warning", "7"), ("Information", "2")]
     assert len(exceptions_shown(app)) == 15
     assert len(app.get("download_button")) == 1
@@ -101,12 +103,30 @@ def test_app_reset_restores_the_config_values():
     assert len(exceptions_shown(app)) == 15
 
 
+def test_app_reset_also_resets_the_value_shown_in_the_widgets():
+    # The browser overwrites the number it shows only when the widget message
+    # carries set_value: deleting the session state key reset the engine
+    # (15 exceptions) but the field still showed 12,00.
+    app = started()
+    app.number_input(key="setting_CLO Equity").set_value(12.0).run()
+    app.number_input(key="setting_horizon").set_value(60).run()
+    app.checkbox(key="setting_MISSING_ISIN").uncheck().run()
+    app.button[0].click().run()
+    for key, value in [("setting_CLO Equity", 15.0), ("setting_horizon", 30)]:
+        widget = app.number_input(key=key)
+        assert (widget.value, widget.proto.value, widget.proto.set_value) == (value, value, True)
+    checkbox = app.checkbox(key="setting_MISSING_ISIN")
+    assert (checkbox.value, checkbox.proto.set_value) == (True, True)
+    assert len(exceptions_shown(app)) == 15
+    assert not app.warning  # no "default value and Session State" warning
+
+
 def test_app_exception_filter_only_hides_rows():
     app = started()
     app.tabs[1].multiselect[0].select("Critical").run()
     shown = exceptions_shown(app)
     assert len(shown) == 6 and set(shown["Severity"]) == {"Critical"}
-    assert app.metric[0].value == "6"  # the summary is unchanged
+    assert app.metric[1].value == "15"  # the summary is unchanged
 
 
 def test_app_waits_for_the_3_uploads():
@@ -141,6 +161,14 @@ def test_app_unreadable_upload_shows_a_readable_error(content):
     app = upload(started(), {**sample_files(), "cashflows": content})
     assert not app.exception
     assert "is not an .xlsx workbook" in app.error[0].value
+
+
+def test_app_upload_error_names_the_uploaded_file():
+    app = upload(started(), sample_files())
+    app.file_uploader(key="upload_cashflows").set_value(
+        ("cashflows_march.xlsx", b"not an excel file", XLSX_MIME))
+    message = app.run().error[0].value
+    assert message.startswith("The cashflows file (cashflows_march.xlsx) is not an .xlsx")
 
 
 def test_app_tables_above_the_styling_limit_are_shown_plain():
@@ -231,7 +259,11 @@ def test_app_large_sample_shows_the_manifest_exceptions():
     by_severity = expected.groupby("ExpectedSeverity")["ExpectedExceptionCount"].sum()
     app = large_sample(started())
     assert not app.exception and not app.error
-    assert {metric.label: int(metric.value) for metric in app.metric} == by_severity.to_dict()
+    metrics = {metric.label: int(metric.value) for metric in app.metric}
+    positions = len(pd.read_excel(REPO_ROOT / "data" / "large" / "positions.xlsx"))
+    assert metrics == {"Positions analysed": positions,
+                       "Total exceptions": expected["ExpectedExceptionCount"].sum(),
+                       **by_severity.to_dict()}
     assert len(exceptions_shown(app)) == expected["ExpectedExceptionCount"].sum()
 
 
@@ -270,9 +302,22 @@ def test_app_unmatched_cashflows_are_tinted():
     assert len(styled_rows(app, 3, UNMATCHED_TINT)) == unmatched
 
 
-def test_app_controls_column_is_wide():
-    columns = json.loads(started().tabs[4].dataframe[0].proto.columns)
-    assert columns["Controls"]["width"] == "large"
+def test_app_dimension_block_is_a_static_table_so_controls_wrap():
+    # st.dataframe cut the long Controls lists; a static table wraps them.
+    block = started().tabs[4].table[0].value
+    assert block.loc[0, "Controls"] == ("MISSING_ISIN, MISSING_MARKET_PRICE, MISSING_RATING, "
+                                        "MISSING_VALUE")
+
+
+def test_app_tables_show_empty_cells_not_none():
+    # A01 has no ISIN: a styled cell is sent as text, which read "None".
+    app = started()
+    table = app.tabs[1].dataframe[0].proto
+    shown = convert_arrow_bytes_to_pandas_df(table.arrow_data.styler.display_values)
+    assert shown.loc[shown["ControlID"] == "MISSING_ISIN", "ISIN"].tolist() == [""]
+    for tab in app.tabs:
+        assert all(frame.proto.HasField("placeholder") and frame.proto.placeholder == ""
+                   for frame in tab.dataframe)
 
 
 def test_app_data_quality_tab_shows_the_three_blocks_in_order():
@@ -280,8 +325,8 @@ def test_app_data_quality_tab_shows_the_three_blocks_in_order():
     assert [header.value for header in tab.subheader] == [
         DIMENSION_BLOCK_TITLE, CHECKS_BLOCK_TITLE, COLUMN_BLOCK_TITLE]
     assert PLAUSIBILITY_NOTE in [caption.value for caption in tab.caption]
-    block, checks, columns = (tab.dataframe[0].value, tab.dataframe[1].value,
-                              tab.dataframe[2].value)
+    block, checks, columns = (tab.table[0].value, tab.dataframe[0].value,
+                              tab.dataframe[1].value)
     assert len(checks) == 15 and checks["Exceptions"].sum() == 15
     assert block["Dimension"].tolist()[0] == "Completeness" and len(block) == 6
     assert block["Exceptions"].sum() == 15

@@ -38,6 +38,9 @@ SECTION_NOMINAL = "Nominal total by currency"
 SECTION_MARKET_VALUE = "Market value by currency"
 SECTION_UPCOMING_CASHFLOWS = "Upcoming cashflows by currency"
 SECTION_PRICE_MOVES = "Price moves"
+# Overview items read by the app's headline metrics.
+ITEM_POSITIONS = "Positions"
+ITEM_TOTAL_EXCEPTIONS = "Total exceptions"
 NO_PORTFOLIO = "(none)"  # exceptions without a portfolio
 NO_ASSET_TYPE = "(none)"  # app filter: exceptions without a position (e.g. unmatched)
 

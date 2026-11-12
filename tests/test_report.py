@@ -240,7 +240,8 @@ def test_report_data_quality_sheet_has_the_three_blocks_in_order(workbook, input
     checks = input_results.checks_performed
     assert sheet["A1"].value == DIMENSION_BLOCK_TITLE
     assert row_values(sheet, 2, len(block.columns)) == list(DIMENSION_QUALITY_COLUMNS)
-    for offset, row in enumerate(block.itertuples(index=False)):
+    shown = block.assign(Controls=block["Controls"].str.replace(", ", "\n"))  # one per line
+    for offset, row in enumerate(shown.itertuples(index=False)):
         assert row_values(sheet, 3 + offset, len(block.columns)) == list(row)
     note_row = 3 + len(block)
     assert sheet.cell(row=note_row, column=1).value == PLAUSIBILITY_NOTE
@@ -274,10 +275,14 @@ def test_report_unmatched_cashflows_are_highlighted(workbook, input_results):
     assert filled == unmatched and sum(filled) == 1  # A12
 
 
-def test_report_dimension_controls_wrap_in_their_cell(workbook, input_results):
+def test_report_dimension_controls_are_one_per_line(workbook, input_results):
+    # A comma-separated list was cut at the 60-character column width.
     sheet = workbook["Data Quality"]
-    rows = range(3, 3 + len(input_results.dimension_quality))
+    block = input_results.dimension_quality
+    rows = range(3, 3 + len(block))
     assert all(sheet.cell(row=row, column=2).alignment.wrap_text for row in rows)
+    assert [sheet.cell(row=row, column=2).value for row in rows] == [
+        controls.replace(", ", "\n") for controls in block["Controls"]]
 
 
 def sheet_values(workbook: openpyxl.Workbook) -> dict[str, list[tuple]]:

@@ -303,9 +303,9 @@ Pure functions, same inputs as controls, returning the non-exception outputs:
   (enabled controls, exceptions, severity split; zeros included);
 - `checks_performed(exceptions, ctx)`: one row per control of config.yaml
   (label, dimension, severity, enabled, exceptions; zeros included);
-- `exception_asset_types(exceptions, data, ctx)`: the AssetType of the
-  position each exception points to (row, Portfolio + ISIN or held ISIN),
-  used by the engine to fill the AssetType column;
+- `exception_position_values(exceptions, data, column, ctx)`: a column of
+  the position each exception points to (row, Portfolio + ISIN or held
+  ISIN), used by the engine to fill SecurityName and AssetType;
 - `summary(exceptions, data, ctx)`: counts by severity, control, dimension,
   portfolio,
   and the headline figures of the executive summary. Upcoming totals leave
@@ -327,7 +327,7 @@ the price change formula and its rounding are those of `CLAUDE.md`.
 - `run(data: InputData, config: Config) -> Results` is the only entry point.
 - Steps: check the registry → build context (one valuation date, section
   4.3) → run enabled controls in the order of `config.yaml` → add the
-  AssetType of each exception's position → concatenate → sort (Severity, ControlID, Portfolio, ISIN,
+  SecurityName and AssetType of each exception's position → concatenate → sort (Severity, ControlID, Portfolio, ISIN,
   SourceRow, Field; empty values last) →
   assign `ExceptionID` → run analytics →
   return `Results`.
@@ -375,7 +375,10 @@ the price change formula and its rounding are those of `CLAUDE.md`.
   sample (data/large)" or "Upload the 3 files" (nothing runs until all 3
   are there); thresholds per asset type, horizon and one
   checkbox per control, applied through `with_overrides` (every value is
-  passed and re-validated); "Reset to config.yaml" clears them. No
+  passed and re-validated); "Reset to config.yaml" assigns the config.yaml
+  values to their session state keys (assigned, not deleted: the browser
+  overwrites the value it shows only when the value is set through session
+  state). No
   reference-date override. The horizon input is capped at
   `MAX_HORIZON_DAYS`. The engine re-runs on every change.
 - Tabs: Summary (severity metrics, exceptions-by-control chart, every
@@ -396,7 +399,10 @@ the price change formula and its rounding are those of `CLAUDE.md`.
 - Same look as the report: the severity, breach and unmatched-cashflow
   tints and the column formats come from `report.py` (`SEVERITY_TINTS`,
   `BREACH_TINT`, `UNMATCHED_TINT`, `COLUMN_FORMATS`), translated to
-  Streamlit syntax. The Controls column of the dimension block is wide.
+  Streamlit syntax. The dimension block is a static table (`st.table`), so
+  the long Controls lists wrap instead of being cut. Empty values show as
+  empty cells, never "None" (`placeholder=""`, and `na_rep=""` on styled
+  tables, whose cells are sent as text).
   A table with more cells than pandas can style
   (`styler.render.max_elements`, 262,144 by default) is shown without
   tints, with a caption saying so.

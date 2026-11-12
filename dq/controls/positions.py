@@ -44,7 +44,7 @@ def describe_position_differences(group: pd.DataFrame) -> str:
     differing = [column for column in COLUMN_TYPES["positions"]
                  if group[column].nunique(dropna=False) > 1]
     rows = f"Rows differ on {', '.join(differing)}." if differing else "Rows are identical."
-    return f"The position is counted twice in totals. {rows}"
+    return f"Each row with valid values is included in totals. {rows}"
 
 
 def check_missing_market_price(data: InputData, ctx: Context) -> pd.DataFrame:

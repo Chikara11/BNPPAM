@@ -14,8 +14,9 @@ from dq.config import INPUT_FILES, MAX_HORIZON_DAYS, SEVERITIES
 from dq.report import (AMOUNT_FORMAT, BREACH_TINT, CHECKS_BLOCK_TITLE, COLUMN_BLOCK_TITLE,
                        COLUMN_FORMATS, DATE_FORMAT, DIMENSION_BLOCK_TITLE, PLAUSIBILITY_NOTE,
                        PRICE_FORMAT, SEVERITY_TINTS, UNMATCHED_TINT, write_report)
-from dq.schema import (COMPUTED, NO_ASSET_TYPE, NO_PORTFOLIO, SECTION_BY_CONTROL,
-                       SECTION_BY_SEVERITY, SECTION_DISABLED_CONTROLS)
+from dq.schema import (COMPUTED, ITEM_POSITIONS, ITEM_TOTAL_EXCEPTIONS, NO_ASSET_TYPE,
+                       NO_PORTFOLIO, SECTION_BY_CONTROL, SECTION_BY_SEVERITY,
+                       SECTION_DISABLED_CONTROLS, SECTION_OVERVIEW)
 
 # Display only (architecture.md section 4.9): every number comes from
 # Results; the app filters and shows, it never computes.
@@ -80,52 +81,77 @@ def show_disabled_controls(results: Results) -> None:
 
 def input_data() -> InputData | None:
     source = st.sidebar.radio("Input files", [*SAMPLES, UPLOAD], key="source")
+    # (file name, content) per input file: the name appears in the loader's errors
     if source in SAMPLES:
-        files = {file: (SAMPLES[source] / f"{file}.xlsx").read_bytes() for file in INPUT_FILES}
+        paths = {file: SAMPLES[source] / f"{file}.xlsx" for file in INPUT_FILES}
+        files = {file: (path.name, path.read_bytes()) for file, path in paths.items()}
     else:
         uploads = {file: st.sidebar.file_uploader(f"{file}.xlsx", type="xlsx",
                                                   key=f"upload_{file}")
                    for file in INPUT_FILES}
         if any(upload is None for upload in uploads.values()):
             return None
-        files = {file: upload.getvalue() for file, upload in uploads.items()}
+        files = {file: (upload.name, upload.getvalue()) for file, upload in uploads.items()}
     return load_files(files["positions"], files["previous_prices"], files["cashflows"])
 
 
 # max_entries: every upload is a new key; bounds the memory of a shared server.
 @st.cache_data(show_spinner="Reading the input files...", max_entries=10)
-def load_files(positions: bytes, previous_prices: bytes, cashflows: bytes) -> InputData:
-    # Cached on the file bytes. The required columns come from config.yaml,
-    # which the sidebar never changes, so the config is not part of the key.
-    return load_inputs(io.BytesIO(positions), io.BytesIO(previous_prices),
-                       io.BytesIO(cashflows), load_config(CONFIG_PATH))
+def load_files(positions: tuple[str, bytes], previous_prices: tuple[str, bytes],
+               cashflows: tuple[str, bytes]) -> InputData:
+    # Cached on the file names and bytes. The required columns come from
+    # config.yaml, which the sidebar never changes, so the config is not part
+    # of the key.
+    return load_inputs(named_buffer(*positions), named_buffer(*previous_prices),
+                       named_buffer(*cashflows), load_config(CONFIG_PATH))
+
+
+def named_buffer(name: str, content: bytes) -> io.BytesIO:
+    buffer = io.BytesIO(content)
+    buffer.name = name  # read by loaders.source_name for the error messages
+    return buffer
 
 
 def sidebar_overrides(config: Config) -> dict:
     # Every sidebar value is passed to with_overrides, which re-validates it.
+    # The widgets take their value from session state, set once from config.yaml.
+    defaults = setting_defaults(config)
+    for key, value in defaults.items():
+        st.session_state.setdefault(key, value)
     sidebar = st.sidebar
-    sidebar.button("Reset to config.yaml", on_click=reset_settings)
+    sidebar.button("Reset to config.yaml", on_click=reset_settings, args=(defaults,))
     sidebar.subheader("Price move thresholds (%)")
-    thresholds = {asset_type: sidebar.number_input(asset_type, min_value=0.0, value=default,
-                                                   step=0.5, key=f"{SETTING_KEY}{asset_type}")
-                  for asset_type, default in config.price_move_thresholds_pct.items()}
+    thresholds = {asset_type: sidebar.number_input(asset_type, min_value=0.0, step=0.5,
+                                                   key=f"{SETTING_KEY}{asset_type}")
+                  for asset_type in config.price_move_thresholds_pct}
     horizon = sidebar.number_input("Cashflow horizon (days)", min_value=0,
-                                   max_value=MAX_HORIZON_DAYS,
-                                   value=config.cashflow_horizon_days, step=1,
+                                   max_value=MAX_HORIZON_DAYS, step=1,
                                    key=f"{SETTING_KEY}horizon")
     with sidebar.expander("Controls"):
         enabled = {control_id: st.checkbox(f"{settings.label} ({settings.severity})",
-                                           value=settings.enabled,
                                            key=f"{SETTING_KEY}{control_id}")
                    for control_id, settings in config.controls.items()}
     return {"price_move_thresholds_pct": thresholds, "cashflow_horizon_days": horizon,
             "controls": {control_id: {"enabled": on} for control_id, on in enabled.items()}}
 
 
-def reset_settings() -> None:
-    # Without their session state, the widgets start again from config.yaml.
-    for key in [key for key in st.session_state if str(key).startswith(SETTING_KEY)]:
-        del st.session_state[key]
+def setting_defaults(config: Config) -> dict:
+    # Session state key of every sidebar widget -> its value in config.yaml.
+    return {
+        **{f"{SETTING_KEY}{asset_type}": threshold
+           for asset_type, threshold in config.price_move_thresholds_pct.items()},
+        f"{SETTING_KEY}horizon": config.cashflow_horizon_days,
+        **{f"{SETTING_KEY}{control_id}": settings.enabled
+           for control_id, settings in config.controls.items()},
+    }
+
+
+def reset_settings(defaults: dict) -> None:
+    # Assigned, not deleted: the browser only overwrites the value it shows
+    # when the value is set through session state (deleting the key reset the
+    # engine but left the old number in the field).
+    for key, value in defaults.items():
+        st.session_state[key] = value
 
 
 def show_download(results: Results) -> None:
@@ -159,7 +185,8 @@ def show_tabs(results: Results) -> None:
 def show_data_quality(results: Results) -> None:
     # Same blocks, titles and note as the report's Data Quality sheet.
     st.subheader(DIMENSION_BLOCK_TITLE)
-    show_table(results.dimension_quality)
+    # A static table wraps the long Controls lists (st.dataframe cuts them).
+    st.table(results.dimension_quality.fillna({"Controls": ""}), hide_index=True)
     st.caption(PLAUSIBILITY_NOTE)
     st.subheader(CHECKS_BLOCK_TITLE)
     show_table(results.checks_performed)
@@ -170,10 +197,13 @@ def show_data_quality(results: Results) -> None:
 def show_summary(results: Results) -> None:
     summary = results.summary
     st.markdown(f"**Reference date:** {results.reference_date:%Y-%m-%d}")
+    overview = summary[summary["Section"] == SECTION_OVERVIEW].set_index("Item")["Value"]
+    headline = {"Positions analysed": overview[ITEM_POSITIONS],
+                "Total exceptions": overview[ITEM_TOTAL_EXCEPTIONS]}
     by_severity = summary[summary["Section"] == SECTION_BY_SEVERITY]
-    for column, (severity, count) in zip(st.columns(len(by_severity)),
-                                         zip(by_severity["Item"], by_severity["Value"])):
-        column.metric(severity, int(count))
+    for metrics in (headline, dict(zip(by_severity["Item"], by_severity["Value"]))):
+        for column, (label, count) in zip(st.columns(len(metrics)), metrics.items()):
+            column.metric(label, int(count))
     by_control = summary[summary["Section"] == SECTION_BY_CONTROL]
     if not by_control.empty:
         st.plotly_chart(control_figure(by_control), key="by_control")
@@ -181,7 +211,7 @@ def show_summary(results: Results) -> None:
         st.subheader(section)
         shown = ["Item", "Value"] if rows["Currency"].isna().all() else ["Currency", "Value"]
         value_format = UNIT_FORMATS[rows["Unit"].iloc[0]]  # one unit per section
-        st.dataframe(rows[shown], hide_index=True, width="content",
+        st.dataframe(rows[shown], hide_index=True, width="content", placeholder="",
                      column_config={"Value": st.column_config.NumberColumn(format=value_format)})
 
 
@@ -303,14 +333,16 @@ def show_table(table: pd.DataFrame | Styler) -> None:
         st.caption(f"{len(frame):,} rows: shown without colours (more than {limit:,} "
                    f"cells to colour).")
         table = frame
-    st.dataframe(table, hide_index=True, column_config=column_config(frame))
+    if isinstance(table, Styler):
+        # a styled cell is sent as text: an empty value would read "None"
+        table = table.format(na_rep="")
+    # placeholder: empty cells stay empty instead of showing "None"
+    st.dataframe(table, hide_index=True, column_config=column_config(frame), placeholder="")
 
 
 def column_config(frame: pd.DataFrame) -> dict:
     # Same formats as the Excel report, for the columns it formats.
     config = {}
-    if "Controls" in frame.columns:  # comma-separated control IDs, up to ~65 characters
-        config["Controls"] = st.column_config.TextColumn(width="large")
     for column in frame.columns:
         excel_format = COLUMN_FORMATS.get(column)
         if excel_format == DATE_FORMAT:

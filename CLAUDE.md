@@ -156,8 +156,8 @@ The engine follows these rules:
    is present and <= 0.
 4. Cashflow matching checks that Portfolio + ISIN exists in the positions;
    it never joins row by row, so a duplicated position does not duplicate
-   cashflows. Reports state that a duplicated position is counted twice
-   in totals.
+   cashflows. Reports state that each row of a duplicated position with
+   valid values is included in totals.
 5. Duplicates (positions, previous prices, cashflows) raise one exception
    per duplicated key, not one per row.
 6. CURRENCY_MISMATCH is checked only on cashflows that match a position.

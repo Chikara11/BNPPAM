@@ -50,8 +50,8 @@ One row per exception. Format referenced by CLAUDE.md.
 | 6 | Source | object | no | Input file: `positions`, `previous_prices` or `cashflows` |
 | 7 | Portfolio | object | yes | |
 | 8 | ISIN | object | yes | Empty for MISSING_ISIN |
-| 9 | SecurityName | object | yes | Empty when unknown (e.g. unmatched cashflow) |
-| 10 | AssetType | object | yes | From the position the exception points to: the row (positions), the matching Portfolio + ISIN (cashflows), the first held position with that ISIN (previous_prices); empty when there is none (e.g. unmatched cashflow). Added by the engine after the controls |
+| 9 | SecurityName | object | yes | From the position the exception points to, like AssetType; empty when there is none (e.g. unmatched cashflow) |
+| 10 | AssetType | object | yes | From the position the exception points to: the row (positions), the matching Portfolio + ISIN (cashflows), the first held position with that ISIN (previous_prices); empty when there is none (e.g. unmatched cashflow). SecurityName and AssetType are added by the engine after the controls, in one step |
 | 11 | Field | object | no | Column checked; key columns joined with `+` for duplicates and unmatched cashflows |
 | 12 | ObservedValue | object | yes | Value as text (raw text for conversion failures) |
 | 13 | Comment | object | no | Plain-language explanation with the expected rule and, for multi-row exceptions, the Excel rows (the first 20, then `(+N more)`: an Excel cell holds 32,767 characters) |
@@ -215,8 +215,10 @@ currencies are never mixed.
 
 Sections, in this order:
 1. `Overview`, in this order: `Positions` (at the reference date),
-   `Portfolios`, `Distinct ISINs`, `Duplicated position rows (counted twice in
-   totals)` (extra rows of a duplicated key, never removed), `Cashflows in
+   `Portfolios`, `Distinct ISINs`, `Total exceptions` (rows of `exceptions`),
+   `Duplicated position rows (each row with
+   valid values included in totals)` (extra rows of a duplicated key, never
+   removed; same wording as CLAUDE.md exception rule 4), `Cashflows in
    the horizon`, `Duplicated cashflow rows in the horizon` (extra rows of a
    duplicated cashflow key among the upcoming cashflows; they are in the
    totals), `Cashflows excluded from totals` (upcoming cashflows with a
@@ -233,7 +235,8 @@ Sections, in this order:
 4b. `Nominal total by currency`: sum of Nominal where it is present and
    > 0 and the Currency is allowed (same exclusions as market value for the
    nominal itself; a position without a usable MarketPrice still holds its
-   nominal). Duplicated rows are counted twice, as in market value.
+   nominal). Each row of a duplicated position with a valid nominal is
+   included, as in market value.
 5. `Market value by currency`: sum of MarketValue where computable.
 6. `Upcoming cashflows by currency`: sum of Amount in the horizon, without
    the cashflows excluded from totals (section 3).
@@ -256,7 +259,7 @@ The reference date is not a row: it is `Results.reference_date`.
 | 2 | Exceptions | `exceptions`, severity colours, filters, frozen header |
 | 3 | Price Movements | `price_movements`, breaches highlighted |
 | 4 | Cashflows {N}D | `upcoming_cashflows`; N = horizon in days; unmatched cashflows highlighted with the Warning tint |
-| 5 | Data Quality | "Checks by dimension": `dimension_quality` (Controls wrapped in their cell), then the note "Plausibility = review alerts (e.g. large price moves), not necessarily data errors."; a blank row; "Checks performed": `checks_performed`; a blank row; "Completeness by column": `data_quality`. Autofilter on the column table only, no frozen header (Excel allows one filter per sheet) |
+| 5 | Data Quality | "Checks by dimension": `dimension_quality` (Controls one control per line, wrapped in their cell), then the note "Plausibility = review alerts (e.g. large price moves), not necessarily data errors."; a blank row; "Checks performed": `checks_performed`; a blank row; "Completeness by column": `data_quality`. Autofilter on the column table only, no frozen header (Excel allows one filter per sheet) |
 | 6 | Parameters | Config used for the run: `Parameter`, `Value` (text), one row per setting |
 
 **[Decision]** Number formats: amounts `#,##0.00`, prices `0.00`,

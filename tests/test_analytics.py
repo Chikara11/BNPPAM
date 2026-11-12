@@ -11,6 +11,10 @@ from dq.schema import (CHECKS_PERFORMED_COLUMNS, DATA_QUALITY_COLUMNS,
 from helpers import CONFIG, cashflow, make_data, parse_issue, position, price
 
 
+DUPLICATED_POSITION_ROWS = ("Duplicated position rows (each row with valid values included in "
+                            "totals)")
+
+
 def manifest_values(manifest: pd.DataFrame, case_id: str) -> dict:
     # "PreviousPrice (VD-7); MarketPrice" + "98.00; 91.00" -> {field: value}
     case = manifest[manifest["AnomalyID"] == case_id].iloc[0]
@@ -226,7 +230,7 @@ def test_move_status_names_the_precise_reason(data, status):
 
 def test_summary_shows_duplicated_rows_on_inputs(input_results):
     assert summary_value(input_results, "Overview",
-                         "Duplicated position rows (counted twice in totals)") == 1  # A02
+                         DUPLICATED_POSITION_ROWS) == 1  # A02
     assert summary_value(input_results, "Overview",
                          "Duplicated cashflow rows in the horizon") == 0  # A13 is beyond 30 days
 
@@ -236,7 +240,7 @@ def test_duplicated_rows_stay_in_the_totals():
     data = make_data([position(), position()], cashflows=[upcoming, upcoming])
     results = run(data, CONFIG)
     assert summary_value(results, "Overview",
-                         "Duplicated position rows (counted twice in totals)") == 1
+                         DUPLICATED_POSITION_ROWS) == 1
     assert summary_value(results, "Overview", "Duplicated cashflow rows in the horizon") == 1
     assert summary_value(results, "Overview", "Cashflows in the horizon") == 2
     assert summary_value(results, "Upcoming cashflows by currency", "Upcoming cashflows",
@@ -387,7 +391,7 @@ def test_nominal_total_counts_valid_nominals_in_allowed_currencies_only():
     assert list(zip(nominal["Currency"], nominal["Value"])) == [("EUR", 2 * 5000000.0)]
 
 
-def test_exceptions_carry_the_asset_type_of_their_position():
+def test_exceptions_carry_the_security_name_and_asset_type_of_their_position():
     # Positions: the row; cashflows: the matching Portfolio + ISIN (empty when
     # unmatched); previous prices: the held position with that ISIN.
     data = make_data([position(AssetType="ABS", Rating=None)],
@@ -399,6 +403,12 @@ def test_exceptions_carry_the_asset_type_of_their_position():
     assert exceptions.loc["DUPLICATE_PREVIOUS_PRICE", "AssetType"] == "ABS"
     assert exceptions.loc["PAST_FORECAST_CASHFLOW", "AssetType"] == "ABS"
     assert exceptions.loc["UNMATCHED_CASHFLOW", "AssetType"] is None
+    # SecurityName from the same position, in the same engine step
+    names = exceptions["SecurityName"].to_dict()
+    assert names == {"MISSING_RATING": "Aurora CLO 2023-1 B",
+                     "DUPLICATE_PREVIOUS_PRICE": "Aurora CLO 2023-1 B",
+                     "PAST_FORECAST_CASHFLOW": "Aurora CLO 2023-1 B",
+                     "UNMATCHED_CASHFLOW": None}
 
 
 def test_checks_performed_lists_every_control_with_its_exceptions(input_data):
@@ -409,3 +419,16 @@ def test_checks_performed_lists_every_control_with_its_exceptions(input_data):
     assert (row["Enabled"], row["Exceptions"]) == (False, 0)
     assert checks["Exceptions"].sum() == 14  # 15 on the fixture, A01 not checked
     assert checks.set_index("ControlID").loc["PRICE_MOVE_ABOVE_THRESHOLD", "Exceptions"] == 3
+
+
+def test_cashflow_value_exceptions_carry_the_security_name():
+    # The shared controls (MISSING_VALUE, INVALID_VALUE) used to leave it empty.
+    data = make_data(cashflows=[cashflow(Status=None), cashflow(Amount=-1.0)])
+    exceptions = run(data, CONFIG).exceptions
+    assert exceptions["ControlID"].tolist() == ["INVALID_VALUE", "MISSING_VALUE"]
+    assert exceptions["SecurityName"].tolist() == ["Aurora CLO 2023-1 B"] * 2
+
+
+def test_summary_total_exceptions_equals_the_exceptions_table(input_results):
+    assert summary_value(input_results, "Overview", "Total exceptions") == len(
+        input_results.exceptions) == 15

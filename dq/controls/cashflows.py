@@ -22,7 +22,7 @@ def check_unmatched_cashflow(data: InputData, ctx: Context) -> pd.DataFrame:
     cashflows = data.cashflows
     unmatched = (matchable(data, ctx) & allowed_portfolio(cashflows, ctx)
                  & ~matches_a_position(data, ctx))
-    rows = with_security_name(data, cashflows[unmatched], ctx)
+    rows = cashflows[unmatched]
     return make_exceptions(
         rows, "UNMATCHED_CASHFLOW", ctx, "cashflows", "+".join(key),
         observed=key_text(rows, key),
@@ -37,7 +37,7 @@ def check_duplicate_cashflow(data: InputData, ctx: Context) -> pd.DataFrame:
     incomplete key or a bad ISIN are not compared (rules 1 and 12).
     """
     candidates = duplicate_candidates(data, "cashflows", ctx)
-    rows = with_security_name(data, data.cashflows[candidates], ctx)
+    rows = data.cashflows[candidates]
     return make_duplicate_exceptions(rows, ctx.config.keys["cashflow_unique"],
                                      "DUPLICATE_CASHFLOW", ctx, "cashflows")
 
@@ -52,7 +52,7 @@ def check_past_forecast_cashflow(data: InputData, ctx: Context) -> pd.DataFrame:
     cashflows = data.cashflows
     past = (evaluated_rows(data, "cashflows", ctx) & (cashflows["Status"] == STATUS_FORECAST)
             & (cashflows["CashflowDate"] < ctx.reference_date))
-    rows = with_security_name(data, cashflows[past], ctx)
+    rows = cashflows[past]
     return make_exceptions(
         rows, "PAST_FORECAST_CASHFLOW", ctx, "cashflows", "CashflowDate",
         observed=rows["CashflowDate"],
@@ -74,7 +74,7 @@ def check_currency_mismatch(data: InputData, ctx: Context) -> pd.DataFrame:
     position_currency = position_values(data, cashflows, "Currency", ctx)
     mismatch = (evaluated_rows(data, "cashflows", ctx) & currency.isin(allowed)
                 & position_currency.isin(allowed) & (currency != position_currency))
-    rows = with_security_name(data, cashflows[mismatch], ctx)
+    rows = cashflows[mismatch]
     return make_exceptions(
         rows, "CURRENCY_MISMATCH", ctx, "cashflows", "Currency", observed=rows["Currency"],
         comment="Cashflow in " + rows["Currency"] + ", position in "
@@ -95,12 +95,6 @@ def allowed_portfolio(cashflows: pd.DataFrame, ctx: Context) -> pd.Series:
     if allowed is None:
         return pd.Series(True, index=cashflows.index)
     return cashflows["Portfolio"].isin(allowed)
-
-
-def with_security_name(data: InputData, rows: pd.DataFrame, ctx: Context) -> pd.DataFrame:
-    # Cashflows have no SecurityName: take it from the matching position,
-    # empty when there is none (output_spec.md section 1).
-    return rows.assign(SecurityName=position_values(data, rows, "SecurityName", ctx))
 
 
 def key_text(rows: pd.DataFrame, key: tuple[str, ...]) -> pd.Series | None:

@@ -12,6 +12,8 @@ from dq.exceptions import combine_exceptions
 from dq.loaders import InputData
 
 SORT_COLUMNS = ["Severity", "ControlID", "Portfolio", "ISIN", "SourceRow", "Field"]
+# Exception columns taken from the position each exception points to.
+POSITION_COLUMNS = ("SecurityName", "AssetType")
 
 
 class RegistryError(Exception):
@@ -35,14 +37,16 @@ def run(data: InputData, config: Config) -> Results:
     """Run the engine on loaded inputs: the only entry point.
 
     Checks the registry, builds the context (one valuation date), runs the
-    enabled controls in config.yaml order, adds the AssetType of each
-    exception's position, sorts and numbers the exceptions, then computes the
+    enabled controls in config.yaml order, adds the SecurityName and AssetType
+    of each exception's position, sorts and numbers the exceptions, then computes the
     analytics. Returns Results.
     """
     check_registry(config)
     ctx = build_context(data, config)
     found = run_controls(data, ctx)
-    found = found.assign(AssetType=analytics.exception_asset_types(found, data, ctx))
+    # one place for the 3 files, so both are filled whenever a position exists
+    found = found.assign(**{column: analytics.exception_position_values(found, data, column, ctx)
+                            for column in POSITION_COLUMNS})
     exceptions = assign_exception_ids(sort_exceptions(found))
     return Results(
         reference_date=ctx.reference_date,

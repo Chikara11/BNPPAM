@@ -11,6 +11,7 @@ from dq.loaders import InputData, empty_rows, parse_issues_of, truly_missing
 from dq.schema import (CHECKS_PERFORMED_COLUMNS, COMPUTED, CONFLICTING_PRICES,
                        DATA_QUALITY_COLUMNS, DIMENSION_QUALITY_COLUMNS, DUPLICATE_ROW,
                        INVALID_ISIN, INVALID_MARKET_PRICE, INVALID_PREVIOUS_PRICE,
+                       ITEM_POSITIONS, ITEM_TOTAL_EXCEPTIONS,
                        MISSING_ISIN, MISSING_MARKET_PRICE, MISSING_PREVIOUS_PRICE,
                        NO_PORTFOLIO, NO_PRICE_HISTORY, NO_THRESHOLD, NO_USABLE_PRICE,
                        PRICE_MOVEMENT_COLUMNS, SECTION_BY_CONTROL, SECTION_BY_DIMENSION,
@@ -121,11 +122,13 @@ def summary(exceptions: pd.DataFrame, data: InputData, ctx: Context) -> pd.DataF
         rows.append({"Section": section, "Item": item, "Currency": currency,
                      "Value": float(value), "Unit": unit})
 
-    add(SECTION_OVERVIEW, "Positions", len(moves))
+    add(SECTION_OVERVIEW, ITEM_POSITIONS, len(moves))
     add(SECTION_OVERVIEW, "Portfolios", moves["Portfolio"].dropna().nunique())
     add(SECTION_OVERVIEW, "Distinct ISINs", moves["ISIN"].dropna().nunique())
+    add(SECTION_OVERVIEW, ITEM_TOTAL_EXCEPTIONS, len(exceptions))
     # Duplicates stay in the totals (never repaired), so they are shown here.
-    add(SECTION_OVERVIEW, "Duplicated position rows (counted twice in totals)",
+    add(SECTION_OVERVIEW, "Duplicated position rows (each row with valid values included in "
+                          "totals)",
         (~first_occurrence(data, "positions", ctx)).sum())
     add(SECTION_OVERVIEW, "Cashflows in the horizon", len(upcoming))
     add(SECTION_OVERVIEW, "Duplicated cashflow rows in the horizon",
@@ -414,15 +417,15 @@ def position_values(data: InputData, rows: pd.DataFrame, column: str,
     return pd.Series(found.to_numpy(), index=rows.index, dtype=lookup.dtype)
 
 
-def exception_asset_types(exceptions: pd.DataFrame, data: InputData,
-                          ctx: Context) -> pd.Series:
-    # AssetType of the position an exception points to: the row itself
+def exception_position_values(exceptions: pd.DataFrame, data: InputData, column: str,
+                              ctx: Context) -> pd.Series:
+    # `column` of the position an exception points to: the row itself
     # (positions), the matching Portfolio + ISIN (cashflows) or the first held
     # position with that ISIN (previous_prices); empty when there is none.
     source = exceptions["Source"]
-    by_row = exceptions["SourceRow"].map(data.positions.set_index("SourceRow")["AssetType"])
-    by_key = position_values(data, exceptions, "AssetType", ctx)
-    held = matching_positions(data, ctx).drop_duplicates("ISIN").set_index("ISIN")["AssetType"]
+    by_row = exceptions["SourceRow"].map(data.positions.set_index("SourceRow")[column])
+    by_key = position_values(data, exceptions, column, ctx)
+    held = matching_positions(data, ctx).drop_duplicates("ISIN").set_index("ISIN")[column]
     by_isin = exceptions["ISIN"].map(held)
     # object arrays: a lookup that finds nothing comes back as an Int64 or float column
     found = pd.Series(np.select(
