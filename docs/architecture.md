@@ -62,7 +62,7 @@ securitised-credit-dq/
 ├── scripts/
 │   ├── generate_clean_data.py
 │   ├── inject_anomalies.py
-│   └── run_report.py         # CLI: load -> run -> write report
+│   └── run_report.py         # CLI: load -> run -> write report (run with -m)
 ├── tests/
 │   ├── conftest.py
 │   ├── helpers.py            # paths, config, small hand-built tables
@@ -83,8 +83,10 @@ securitised-credit-dq/
 app.py` puts the repo root on the path, and pytest gets it from
 `pythonpath = ["."]` in `pyproject.toml`. A script run as
 `python scripts/<name>.py` only has `scripts/` on its path and cannot import
-`dq`: the generator and the injector are standalone and read `config.yaml`
-themselves. **Open decision**: how `scripts/run_report.py` will import `dq`.
+`dq`, so a script that needs `dq` is run as a module from the repo root:
+`python -m scripts.run_report --inputs data/inputs --output output/report.xlsx`
+(no `sys.path` change, no install). The generator and the injector are
+standalone and read `config.yaml` themselves.
 
 ---
 

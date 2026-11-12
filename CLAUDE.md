@@ -282,7 +282,8 @@ Before every commit
 - Inject anomalies:    `python scripts/inject_anomalies.py` → `data/inputs/`
   (deliverable input files) and `docs/anomaly_manifest.xlsx`
 - Run tests:           `pytest -q`
-- Run the report:      `python scripts/run_report.py --inputs data/inputs --output output/report.xlsx`
+- Run the report:      `python -m scripts.run_report --inputs data/inputs --output output/report.xlsx`
+  (from the repo root, as a module, so that it can import `dq`)
 - Run the app:         `streamlit run app.py`
 
 Run the tests after every change and show the result.
