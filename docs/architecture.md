@@ -180,7 +180,8 @@ config.yaml ──► config.load_config() ──► Config ────┤
     sheet raises `InputSchemaError` naming the sheets (pandas would read a
     hidden first sheet);
   - required columns from `config.yaml`; a missing column raises
-    `InputSchemaError` with the file and column name. A column name that
+    `InputSchemaError` with the file and column name, and the headers found
+    (quoted, so that a trailing space shows). A column name that
     appears twice in the header also raises `InputSchemaError` naming it
     (checked on the raw header, before pandas renames it `X.1`);
   - adds `SourceRow` (Int64): the Excel row number (header = row 1, first
@@ -217,7 +218,8 @@ config.yaml ──► config.load_config() ──► Config ────┤
   from `ctx.config`. `Source` is the input file of the row (`positions`,
   `previous_prices` or `cashflows`).
 - Multi-row exceptions (duplicates): `SourceRow` = first row; `Comment`
-  lists all the rows. Built by `make_duplicate_exceptions` (one exception
+  lists the rows, at most 20 then `(+N more)` (`short_list`; an Excel cell
+  holds 32,767 characters). Built by `make_duplicate_exceptions` (one exception
   per duplicated key, rule 5).
 - `combine_exceptions(frames) -> pd.DataFrame` concatenates the exceptions
   of several checks (empty frames skipped) in the common format.
@@ -303,7 +305,10 @@ Pure functions, same inputs as controls, returning the non-exception outputs:
   out the cashflows of `totalled_cashflows` = False (missing or invalid
   Status, Amount, Currency or CashflowType), counted in "Cashflows excluded
   from totals"; the extra rows of a duplicated position are "Duplicate row
-  (not evaluated)" in `price_movements` and never count as breaches.
+  (not evaluated)" in `price_movements` and never count as breaches. A
+  position whose AssetType has no threshold is "No threshold" (move shown,
+  not judged, not counted as computed). Disabled controls are listed in
+  their own section.
 
 Amounts are always totalled per currency, never summed across currencies
 (no FX conversion), in the summary, the app and the report.
@@ -389,6 +394,8 @@ the price change formula and its rounding are those of `CLAUDE.md`.
   current sidebar settings.
 - Config, input and registry errors are shown with `st.error`, never a
   traceback.
+- A banner (`st.warning`) names the disabled controls, from the
+  "Disabled controls" section of `Results.summary`.
 - No business logic in `app.py`: every number comes from `Results`.
   Caching with `st.cache_data` on loading only (key = the file bytes,
   at most 10 entries, so uploads do not fill the memory of a shared

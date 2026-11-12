@@ -24,12 +24,14 @@ NO_USABLE_PRICE = "No usable previous price"
 CONFLICTING_PRICES = "Conflicting previous prices"
 MISSING_PREVIOUS_PRICE = "Missing previous price"
 INVALID_PREVIOUS_PRICE = "Invalid previous price"
+NO_THRESHOLD = "No threshold"
 COMPUTED = "Computed"
 
 # Summary sections of section 5, in output order.
 SECTION_OVERVIEW = "Overview"
 SECTION_BY_SEVERITY = "Exceptions by severity"
 SECTION_BY_CONTROL = "Exceptions by control"
+SECTION_DISABLED_CONTROLS = "Disabled controls"  # only when a control is disabled
 SECTION_BY_DIMENSION = "Exceptions by dimension"
 SECTION_BY_PORTFOLIO = "Exceptions by portfolio"
 SECTION_MARKET_VALUE = "Market value by currency"

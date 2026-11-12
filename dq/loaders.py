@@ -118,8 +118,11 @@ def check_single_visible_sheet(workbook: pd.ExcelFile, file: str, name: str) -> 
 def check_required_columns(raw: pd.DataFrame, file: str, required: tuple[str, ...]) -> None:
     missing = [column for column in required if column not in raw.columns]
     if missing:
+        # quoted, so that a trailing space or a different case is visible
+        found = ", ".join(repr(column) for column in raw.columns.drop("SourceRow"))
         raise InputSchemaError(f"The {file} file is missing required column(s): "
-                               f"{', '.join(missing)}. Processing stopped.")
+                               f"{', '.join(missing)}. Headers found: {found}. "
+                               f"Processing stopped.")
 
 
 def convert_file(raw: pd.DataFrame, file: str) -> tuple[pd.DataFrame, pd.DataFrame]:

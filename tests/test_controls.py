@@ -540,3 +540,11 @@ def test_isin_with_non_ascii_digits_is_invalid_value_only():
     data = make_data([position(ISIN="SYN\uff10\uff10\uff10\uff10\uff10\uff10\uff10\uff10\uff11")],
                      previous_prices=[], cashflows=[])
     assert raised(data) == [("INVALID_VALUE", "positions", "ISIN")]
+
+
+def test_duplicate_comment_lists_at_most_20_excel_rows():
+    # #14: an Excel cell holds 32,767 characters; 10,000 repeats were cut.
+    data = make_data([position()] * 25)
+    comment = check(position_controls.check_duplicate_position, data).iloc[0]["Comment"]
+    assert "on 25 rows (Excel rows 2, 3, " in comment
+    assert "20, 21 (+5 more))." in comment and "22" not in comment

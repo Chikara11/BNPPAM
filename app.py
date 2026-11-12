@@ -14,7 +14,8 @@ from dq.config import INPUT_FILES, MAX_HORIZON_DAYS, SEVERITIES
 from dq.report import (AMOUNT_FORMAT, BREACH_TINT, COLUMN_BLOCK_TITLE, COLUMN_FORMATS,
                        DATE_FORMAT, DIMENSION_BLOCK_TITLE, PLAUSIBILITY_NOTE, PRICE_FORMAT,
                        SEVERITY_TINTS, UNMATCHED_TINT, write_report)
-from dq.schema import COMPUTED, NO_PORTFOLIO, SECTION_BY_CONTROL, SECTION_BY_SEVERITY
+from dq.schema import (COMPUTED, NO_PORTFOLIO, SECTION_BY_CONTROL, SECTION_BY_SEVERITY,
+                       SECTION_DISABLED_CONTROLS)
 
 # Display only (architecture.md section 4.9): every number comes from
 # Results; the app filters and shows, it never computes.
@@ -63,8 +64,18 @@ def main() -> None:
     except (ConfigError, InputSchemaError, RegistryError) as error:
         st.error(str(error))  # a readable message, never a traceback
         return
+    show_disabled_controls(results)
     show_download(results)
     show_tabs(results)
+
+
+def show_disabled_controls(results: Results) -> None:
+    # With controls switched off, zero exceptions does not mean clean data.
+    summary = results.summary
+    disabled = summary.loc[summary["Section"] == SECTION_DISABLED_CONTROLS, "Item"]
+    if not disabled.empty:
+        st.warning(f"{len(disabled)} control(s) disabled: their exceptions are not raised "
+                   f"({', '.join(disabled)}).")
 
 
 def input_data() -> InputData | None:

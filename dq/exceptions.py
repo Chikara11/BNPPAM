@@ -9,6 +9,10 @@ import pandas as pd
 from dq.context import Context
 from dq.schema import EXCEPTION_COLUMNS, conform, empty_exceptions
 
+# An Excel cell holds at most 32,767 characters: a key repeated on thousands
+# of rows would have its comment cut silently in the report.
+MAX_ROWS_IN_COMMENT = 20
+
 
 def make_exceptions(rows: pd.DataFrame, control_id: str, ctx: Context, file: str, field: str,
                     *, observed: pd.Series | None = None,
@@ -68,7 +72,7 @@ def make_duplicate_exceptions(frame: pd.DataFrame, key: tuple[str, ...], control
     first_labels, observed, comments = [], [], []
     for _, group in duplicated.groupby(list(key), sort=False, dropna=False):
         group = group.sort_values("SourceRow")
-        source_rows = ", ".join(str(row) for row in group["SourceRow"])
+        source_rows = short_list([str(row) for row in group["SourceRow"]])
         text = note(group) if callable(note) else note
         first_labels.append(group.index[0])
         observed.append("+".join(as_text(value) for value in group.iloc[0][list(key)]))
@@ -78,6 +82,13 @@ def make_duplicate_exceptions(frame: pd.DataFrame, key: tuple[str, ...], control
     return make_exceptions(rows, control_id, ctx, file, "+".join(key),
                            observed=pd.Series(observed, index=rows.index),
                            comment=pd.Series(comments, index=rows.index))
+
+
+def short_list(items: list[str]) -> str:
+    # The first MAX_ROWS_IN_COMMENT items, then how many are left out.
+    shown = ", ".join(items[:MAX_ROWS_IN_COMMENT])
+    left_out = len(items) - MAX_ROWS_IN_COMMENT
+    return f"{shown} (+{left_out} more)" if left_out > 0 else shown
 
 
 def combine_exceptions(frames: list[pd.DataFrame]) -> pd.DataFrame:

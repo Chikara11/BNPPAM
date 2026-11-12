@@ -5,7 +5,7 @@ import pandas as pd
 from dq.analytics import duplicate_candidates, price_move_table, valid_isin
 from dq.context import Context
 from dq.controls.common import evaluated_rows
-from dq.exceptions import make_duplicate_exceptions, make_exceptions
+from dq.exceptions import make_duplicate_exceptions, make_exceptions, short_list
 from dq.loaders import InputData
 
 
@@ -68,5 +68,5 @@ def describe_prices(group: pd.DataFrame) -> str:
     values = group["PreviousPrice"]
     if values.nunique(dropna=False) == 1:
         return "Same price on every row."
-    listed = ", ".join("empty" if pd.isna(value) else f"{value:g}" for value in values)
+    listed = short_list(["empty" if pd.isna(value) else f"{value:g}" for value in values])
     return f"Prices differ ({listed})."

@@ -45,6 +45,17 @@ section "Datasets" (checked against the manifests by the tests).
 Streamlit Community Cloud, main file `app.py`, Python 3.12. The app is
 public: upload synthetic files only, never real portfolio data.
 
+## Known limitations
+
+Found by the hostile review of 2026-11-12 and left as they are:
+
+- One root error can raise several exceptions (spec as written): a MaturityDate
+  on the reference date also raises INVALID_VALUE on each of its later
+  cashflows, and a position whose ISIN or Portfolio is invalid leaves each of
+  its cashflows UNMATCHED_CASHFLOW.
+- A formula cell saved without its computed value (a file written by a script,
+  not by Excel) is read as empty and reported as MISSING_VALUE, not as a formula.
+
 ## Possible improvements
 
 Found by the clean-code review of 2026-11-12 and deliberately left out of

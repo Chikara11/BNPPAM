@@ -334,3 +334,26 @@ def test_conflicting_previous_prices_leave_the_previous_price_empty():
     move = price_movements(data, build_context(data, CONFIG)).iloc[0]
     assert move["MoveStatus"] == "Conflicting previous prices"
     assert pd.isna(move["PreviousPrice"]) and pd.isna(move["PriceChangePct"])
+
+
+def test_unknown_asset_type_has_no_threshold_and_is_not_computed():
+    # #11: a -50 % move on an AssetType without threshold looked "Computed"
+    # with no breach.
+    data = make_data([position(AssetType="RMBS", MarketPrice=49.55)])
+    results = run(data, CONFIG)
+    move = results.price_movements.iloc[0]
+    assert move["MoveStatus"] == "No threshold"
+    assert move["PriceChangePct"] == pytest.approx(-50.0)
+    assert pd.isna(move["Breach"]) and pd.isna(move["ThresholdPct"])
+    assert summary_value(results, "Price moves", "Computed") == 0
+    assert summary_value(results, "Price moves", "Not computable") == 1
+
+
+def test_summary_lists_the_disabled_controls():
+    # #12: with controls switched off, zero exceptions is not clean data.
+    data = make_data([position(ISIN=None)])
+    config = with_overrides(CONFIG, {"controls": {"MISSING_ISIN": {"enabled": False}}})
+    summary = run(data, config).summary
+    disabled = summary[summary["Section"] == "Disabled controls"]
+    assert list(zip(disabled["Item"], disabled["Value"])) == [("MISSING_ISIN", 1.0)]
+    assert "Disabled controls" not in run(data, CONFIG).summary["Section"].tolist()

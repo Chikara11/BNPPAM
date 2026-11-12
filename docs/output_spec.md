@@ -53,7 +53,7 @@ One row per exception. Format referenced by CLAUDE.md.
 | 9 | SecurityName | object | yes | Empty when unknown (e.g. unmatched cashflow) |
 | 10 | Field | object | no | Column checked; key columns joined with `+` for duplicates and unmatched cashflows |
 | 11 | ObservedValue | object | yes | Value as text (raw text for conversion failures) |
-| 12 | Comment | object | no | Plain-language explanation with the expected rule and, for multi-row exceptions, all rows |
+| 12 | Comment | object | no | Plain-language explanation with the expected rule and, for multi-row exceptions, the Excel rows (the first 20, then `(+N more)`: an Excel cell holds 32,767 characters) |
 | 13 | SourceRow | Int64 | no | Excel row number (header = 1); first row for multi-row exceptions |
 
 Sort order: Severity (Critical, Warning, Information), ControlID, Portfolio,
@@ -99,7 +99,9 @@ exception rule 12: reported by DUPLICATE_POSITION only, never a breach),
 price` (rows exist but none has a valid PreviousDate before the reference
 date), `Conflicting previous prices` (several different prices on the latest
 PreviousDate), `Missing previous price` (empty on the latest PreviousDate),
-`Invalid previous price` (<= 0 on the latest PreviousDate), `Computed`.
+`Invalid previous price` (<= 0 on the latest PreviousDate), `No threshold`
+(AssetType empty or without a threshold in config.yaml: PriceChangePct is
+shown, Breach is empty, not counted as computed), `Computed`.
 
 Sort order: Breach (True first), abs(PriceChangePct) descending, Portfolio, ISIN.
 
@@ -203,6 +205,9 @@ Sections, in this order:
    missing or invalid Status, Amount, Currency or CashflowType, section 3).
 2. `Exceptions by severity`: Critical, Warning, Information (zeros included).
 3. `Exceptions by control`: every enabled control (zeros included).
+3a. `Disabled controls`: one row per disabled control (Item = control ID,
+   Value 1), so that zero exceptions is never read as clean data. Absent
+   when every control is enabled.
 3b. `Exceptions by dimension`: every dimension of config.yaml, in that
    order (zeros included).
 4. `Exceptions by portfolio`: every portfolio, plus `(none)` for exceptions
@@ -214,7 +219,8 @@ Sections, in this order:
    Sections 5 and 6 list only the currencies of `allowed_values.Currency`,
    in that order: an amount in an empty or unknown currency is never
    totalled (same rule as a Nominal or price <= 0).
-7. `Price moves`: positions computed, breaches, not computable.
+7. `Price moves`: positions computed, breaches, not computable (every other
+   MoveStatus, including `Duplicate row (not evaluated)` and `No threshold`).
 
 The reference date is not a row: it is `Results.reference_date`.
 

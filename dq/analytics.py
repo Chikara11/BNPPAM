@@ -12,9 +12,10 @@ from dq.schema import (COMPUTED, CONFLICTING_PRICES, DATA_QUALITY_COLUMNS,
                        DIMENSION_QUALITY_COLUMNS, DUPLICATE_ROW, INVALID_ISIN,
                        INVALID_MARKET_PRICE, INVALID_PREVIOUS_PRICE, MISSING_ISIN,
                        MISSING_MARKET_PRICE, MISSING_PREVIOUS_PRICE, NO_PORTFOLIO,
-                       NO_PRICE_HISTORY, NO_USABLE_PRICE, PRICE_MOVEMENT_COLUMNS,
+                       NO_PRICE_HISTORY, NO_THRESHOLD, NO_USABLE_PRICE,
+                       PRICE_MOVEMENT_COLUMNS,
                        SECTION_BY_CONTROL, SECTION_BY_DIMENSION, SECTION_BY_PORTFOLIO,
-                       SECTION_BY_SEVERITY,
+                       SECTION_BY_SEVERITY, SECTION_DISABLED_CONTROLS,
                        SECTION_MARKET_VALUE, SECTION_OVERVIEW, SECTION_PRICE_MOVES,
                        SECTION_UPCOMING_CASHFLOWS, STATUS_PAID, SUMMARY_COLUMNS,
                        UPCOMING_CASHFLOW_COLUMNS, conform)
@@ -139,6 +140,10 @@ def summary(exceptions: pd.DataFrame, data: InputData, ctx: Context) -> pd.DataF
     for control_id, settings in ctx.config.controls.items():
         if settings.enabled:
             add(SECTION_BY_CONTROL, control_id, (exceptions["ControlID"] == control_id).sum())
+    # A disabled control raises nothing: listed so that a zero is not read as clean.
+    for control_id, settings in ctx.config.controls.items():
+        if not settings.enabled:
+            add(SECTION_DISABLED_CONTROLS, control_id, 1)
     for dimension in ctx.config.dimensions:
         add(SECTION_BY_DIMENSION, dimension, (exceptions["Dimension"] == dimension).sum())
     for portfolio in portfolios_to_report(exceptions, ctx):
@@ -200,6 +205,8 @@ def price_move_table(data: InputData, ctx: Context) -> pd.DataFrame:
     market_price, previous_price = positions["MarketPrice"], previous["PreviousPrice"]
     # The first reason that applies wins, in this order (rule 7).
     price_status = previous["PreviousPriceStatus"]
+    threshold = positions["AssetType"].map(dict(ctx.config.price_move_thresholds_pct)).astype(
+        "float64")
     reasons = [
         (~first_occurrence(data, "positions", ctx), DUPLICATE_ROW),  # rule 12
         (positions["ISIN"].isna(), MISSING_ISIN),
@@ -211,17 +218,17 @@ def price_move_table(data: InputData, ctx: Context) -> pd.DataFrame:
         (price_status == CONFLICTING_PRICES, CONFLICTING_PRICES),
         (previous_price.isna(), MISSING_PREVIOUS_PRICE),
         (previous_price <= 0, INVALID_PREVIOUS_PRICE),
+        # Empty or unknown AssetType: the move is shown but cannot be judged.
+        (threshold.isna(), NO_THRESHOLD),
     ]
     status = pd.Series(COMPUTED, index=positions.index, dtype=object)
     for applies, reason in reversed(reasons):
         status[applies] = reason
     computed = status == COMPUTED
-    change = price_change_pct(market_price, previous_price).where(computed)
-    threshold = positions["AssetType"].map(dict(ctx.config.price_move_thresholds_pct)).astype(
-        "float64")
+    change = price_change_pct(market_price, previous_price).where(
+        computed | (status == NO_THRESHOLD))
     breach = pd.Series(pd.NA, index=positions.index, dtype="boolean")
-    judged = computed & threshold.notna()  # no threshold for an unknown AssetType
-    breach[judged] = change[judged].abs() > threshold[judged]
+    breach[computed] = change[computed].abs() > threshold[computed]
     return pd.DataFrame({
         "Portfolio": positions["Portfolio"], "ISIN": positions["ISIN"],
         "SecurityName": positions["SecurityName"], "AssetType": positions["AssetType"],

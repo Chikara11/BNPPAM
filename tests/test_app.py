@@ -56,6 +56,15 @@ def test_app_lowering_the_clo_equity_threshold_adds_an_alert():
     assert (moves["ControlID"] == "PRICE_MOVE_ABOVE_THRESHOLD").sum() == 4  # + N01, -12.5 %
 
 
+def test_app_warns_when_a_control_is_disabled():
+    # #12: an all-zero dashboard with controls off must not look clean.
+    app = started()
+    assert not app.warning
+    app.checkbox(key="setting_MISSING_ISIN").uncheck().run()
+    assert "1 control(s) disabled" in app.warning[0].value
+    assert "MISSING_ISIN" in app.warning[0].value
+
+
 def test_app_disabled_control_removes_its_exceptions():
     app = started()
     app.checkbox(key="setting_PRICE_MOVE_ABOVE_THRESHOLD").uncheck().run()

@@ -143,6 +143,15 @@ def test_missing_required_columns_are_all_named(tmp_path):
         load(write_inputs(tmp_path, [position()], header=header))
 
 
+def test_missing_column_error_lists_the_headers_found(tmp_path):
+    # #14: a header "ISIN " was reported as a missing ISIN with nothing to see.
+    header = [f"{c} " if c == "ISIN" else c for c in VALID_ROWS["positions"]]
+    with pytest.raises(InputSchemaError, match=re.escape("missing required column(s): ISIN. "
+                                                         "Headers found: 'ValuationDate', "
+                                                         "'Portfolio', 'ISIN ',")):
+        load(write_inputs(tmp_path, [position()], header=header))
+
+
 def test_column_names_are_case_sensitive(tmp_path):
     header = ["isin" if c == "ISIN" else c for c in VALID_ROWS["positions"]]
     with pytest.raises(InputSchemaError, match="ISIN"):
