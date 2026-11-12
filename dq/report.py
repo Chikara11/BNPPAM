@@ -42,12 +42,12 @@ UNIT_FORMATS = {"count": COUNT_FORMAT, "amount": AMOUNT_FORMAT, "pct": PERCENT_F
 
 HEADER_FONT = Font(bold=True)
 HEADER_FILL = PatternFill(fill_type="solid", start_color="D9D9D9")
-SEVERITY_FILLS = {
-    "Critical": PatternFill(fill_type="solid", start_color="FFC7CE"),     # light red
-    "Warning": PatternFill(fill_type="solid", start_color="FFD8A8"),      # light orange
-    "Information": PatternFill(fill_type="solid", start_color="BDD7EE"),  # light blue
-}
-BREACH_FILL = PatternFill(fill_type="solid", start_color="FFF2CC")  # light yellow
+# Tints also used by app.py, so the report and the app look the same.
+SEVERITY_TINTS = {"Critical": "FFC7CE", "Warning": "FFD8A8", "Information": "BDD7EE"}
+BREACH_TINT = "FFF2CC"  # light yellow, distinct from the severity tints
+SEVERITY_FILLS = {severity: PatternFill(fill_type="solid", start_color=tint)
+                  for severity, tint in SEVERITY_TINTS.items()}
+BREACH_FILL = PatternFill(fill_type="solid", start_color=BREACH_TINT)
 MAX_COLUMN_WIDTH = 60
 DATE_WIDTH = 10
 

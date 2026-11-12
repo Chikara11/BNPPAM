@@ -73,7 +73,8 @@ securitised-credit-dq/
 │   ├── test_controls.py
 │   ├── test_analytics.py
 │   ├── test_boundaries.py
-│   └── test_report.py
+│   ├── test_report.py
+│   └── test_app.py
 ├── data/clean/   data/inputs/
 ├── output/                   # generated reports (git-ignored)
 └── docs/                     # architecture.md, data_spec.md, output_spec.md,
@@ -341,14 +342,29 @@ the price change formula and its rounding are those of `CLAUDE.md`.
   never a traceback.
 
 ### 4.9 `app.py`
-- Upload the 3 files or use the bundled `data/inputs/` sample.
-- Sidebar: thresholds, horizon and enabled controls, applied through
-  `with_overrides`; the engine re-runs on change.
-- Pages / tabs: Summary, Exceptions (filters by severity, control,
-  portfolio), Price Movements (chart), Cashflows {N}D, Data Quality.
-  The Summary shows "Position rows not at the reference date: N (ignored)".
-- Download button: the Excel report built by `report.write_report`.
-- No business logic in `app.py`. Caching with `st.cache_data` on loading.
+- Run with `streamlit run app.py` from the repo root.
+- Sidebar: bundled `data/inputs/` sample or upload of the 3 files (nothing
+  runs until all 3 are there); thresholds per asset type, horizon and one
+  checkbox per control, applied through `with_overrides` (every value is
+  passed and re-validated); "Reset to config.yaml" clears them. No
+  reference-date override. The engine re-runs on every change.
+- Tabs: Summary (severity metrics, exceptions-by-control chart, every
+  `Results.summary` section, including "Position rows not at the reference
+  date (ignored)"), Exceptions (filters by severity, control, portfolio;
+  they only hide rows), Price Movements, Cashflows {N}D, Data Quality.
+- Price Movements chart: one panel per asset type (the thresholds differ),
+  one horizontal bar per computed position, breach / within threshold
+  colours with a legend, dashed ±threshold lines, symmetric axis. A
+  duplicated position keeps two bars (its Excel row is added to the label).
+- Same look as the report: the severity and breach tints and the column
+  formats come from `report.py` (`SEVERITY_TINTS`, `BREACH_TINT`,
+  `COLUMN_FORMATS`), translated to Streamlit syntax.
+- Download button: the Excel report built by `report.write_report` with the
+  current sidebar settings.
+- Config, input and registry errors are shown with `st.error`, never a
+  traceback.
+- No business logic in `app.py`: every number comes from `Results`.
+  Caching with `st.cache_data` on loading only (key = the file bytes).
 
 ---
 
@@ -404,6 +420,9 @@ Changing a threshold or a severity = edit `config.yaml` only.
   headers, rows, number formats, colours, plain text against formula
   injection, Executive Summary, Parameters) and the `run_report` CLI
   (a real `python -m` run, readable errors with exit code 1).
+- `test_app.py`: the app driven by `streamlit.testing.v1.AppTest` (sample
+  and real uploads, sidebar settings, reset, filters, errors, chart
+  content read from the figure spec, column formats and tints).
 - Tests never write files outside a temporary directory.
 
 ---

@@ -4,13 +4,16 @@ import io
 from pathlib import Path
 
 import pandas as pd
+import plotly.graph_objects as go
 import streamlit as st
+from pandas.io.formats.style import Styler
 
 from dq import (Config, ConfigError, InputData, InputSchemaError, RegistryError, Results,
                 load_config, load_inputs, run, with_overrides)
 from dq.config import INPUT_FILES, SEVERITIES
-from dq.report import write_report
-from dq.schema import NO_PORTFOLIO, SECTION_BY_SEVERITY
+from dq.report import (AMOUNT_FORMAT, BREACH_TINT, COLUMN_FORMATS, DATE_FORMAT, PRICE_FORMAT,
+                       SEVERITY_TINTS, write_report)
+from dq.schema import COMPUTED, NO_PORTFOLIO, SECTION_BY_CONTROL, SECTION_BY_SEVERITY
 
 # Display only (architecture.md section 4.9): every number comes from
 # Results; the app filters and shows, it never computes.
@@ -22,7 +25,18 @@ SAMPLE = "Bundled sample (data/inputs)"
 UPLOAD = "Upload the 3 files"
 SETTING_KEY = "setting_"  # prefix of the sidebar widgets that Reset clears
 XLSX_MIME = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-UNIT_FORMATS = {"count": "%d", "amount": "%.2f", "pct": "%.2f"}
+UNIT_FORMATS = {"count": "%d", "amount": "%,.2f", "pct": "%.2f"}
+# The Excel number formats of report.COLUMN_FORMATS in Streamlit syntax, so
+# the app and the report format the same columns the same way. Percentages
+# share the price format (0.00).
+NUMBER_FORMATS = {AMOUNT_FORMAT: "%,.2f", PRICE_FORMAT: "%.2f"}
+INK = "#0b0b0b"  # dark text on the light tints, readable in the dark theme too
+# Chart colours (validated for colour-blind separation and contrast, light
+# and dark): series blue, status-critical red for a breach, muted grey rules.
+SERIES_COLOUR = "#2a78d6"
+BREACH_COLOUR = "#d03b3b"
+RULE_COLOUR = "#898781"
+BAR_HEIGHT = 26  # pixels per bar, so long panels stay readable
 
 
 def main() -> None:
@@ -110,13 +124,13 @@ def show_tabs(results: Results) -> None:
     with exceptions:
         show_exceptions(results.exceptions)
     with moves:
-        st.dataframe(results.price_movements, hide_index=True)
+        show_price_movements(results.price_movements)
     with cashflows:
         st.caption(f"Cashflows dated from the reference date to {days} days after it "
                    f"(both included), Status not Paid.")
-        st.dataframe(results.upcoming_cashflows, hide_index=True)
+        show_table(results.upcoming_cashflows)
     with quality:
-        st.dataframe(results.data_quality, hide_index=True)
+        show_table(results.data_quality)
 
 
 def show_summary(results: Results) -> None:
@@ -126,6 +140,9 @@ def show_summary(results: Results) -> None:
     for column, (severity, count) in zip(st.columns(len(by_severity)),
                                          zip(by_severity["Item"], by_severity["Value"])):
         column.metric(severity, int(count))
+    by_control = summary[summary["Section"] == SECTION_BY_CONTROL]
+    if not by_control.empty:
+        st.plotly_chart(control_figure(by_control), key="by_control")
     for section, rows in summary.groupby("Section", sort=False):
         st.subheader(section)
         shown = ["Item", "Value"] if rows["Currency"].isna().all() else ["Currency", "Value"]
@@ -152,7 +169,93 @@ def show_exceptions(exceptions: pd.DataFrame) -> None:
         shown &= portfolio_text.isin(portfolios)
     filtered = exceptions[shown]
     st.caption(f"{len(filtered)} of {len(exceptions)} exceptions")
-    st.dataframe(filtered, hide_index=True)
+    severity_style = filtered.style.map(
+        lambda severity: tint_css(SEVERITY_TINTS[severity]), subset=["Severity"])
+    show_table(severity_style)
+
+
+def show_price_movements(moves: pd.DataFrame) -> None:
+    # One panel per asset type: the thresholds differ (5 % and 15 %), so a
+    # shared axis would flatten the CLO Debt and ABS moves.
+    st.caption("Positions whose movement is computed (MoveStatus Computed). The others "
+               "are listed in the table with the reason.")
+    computed = moves[moves["MoveStatus"] == COMPUTED]
+    for asset_type, rows in computed.groupby("AssetType", sort=True):
+        st.plotly_chart(price_move_figure(asset_type, rows), key=f"moves_{asset_type}")
+    show_table(moves.style.apply(breach_css, axis=None))
+
+
+def price_move_figure(asset_type: str, rows: pd.DataFrame) -> go.Figure:
+    rows = rows.sort_values(["PriceChangePct", "SourceRow"], kind="stable")
+    labels = position_labels(rows)
+    breach = rows["Breach"].fillna(False).astype(bool)
+    threshold = rows["ThresholdPct"].iloc[0]  # one threshold per asset type
+    figure = go.Figure()
+    for name, selected, colour in [("Within threshold", ~breach, SERIES_COLOUR),
+                                   ("Breach", breach, BREACH_COLOUR)]:
+        if selected.any():
+            figure.add_bar(x=rows.loc[selected, "PriceChangePct"], y=labels[selected],
+                           orientation="h", name=name, marker_color=colour,
+                           hovertemplate="%{y}: %{x:+.2f} %<extra>" + name + "</extra>")
+    for limit in (-threshold, threshold):
+        figure.add_vline(x=limit, line_dash="dash", line_width=1, line_color=RULE_COLOUR,
+                         annotation_text=f"{limit:+g} %", annotation_font_color=RULE_COLOUR)
+    # Symmetric axis around 0, so up and down moves read the same way.
+    reach = max(threshold, rows["PriceChangePct"].abs().max()) * 1.15
+    figure.update_layout(
+        title=f"{asset_type}: change vs previous price (%), threshold ±{threshold:g} %",
+        barmode="relative", barcornerradius=4, height=BAR_HEIGHT * len(rows) + 140,
+        legend={"orientation": "h", "y": 1.02, "yanchor": "bottom"},
+        xaxis={"range": [-reach, reach], "ticksuffix": " %", "zeroline": True},
+        yaxis={"categoryorder": "array", "categoryarray": list(labels)})
+    return figure
+
+
+def position_labels(rows: pd.DataFrame) -> pd.Series:
+    # Portfolio · ISIN; a duplicated position also gets its Excel row, so that
+    # its two bars do not merge into one.
+    labels = rows["Portfolio"].fillna(NO_PORTFOLIO) + " · " + rows["ISIN"]
+    repeated = labels.duplicated(keep=False)
+    return labels.where(~repeated, labels + " (row " + rows["SourceRow"].astype(str) + ")")
+
+
+def control_figure(by_control: pd.DataFrame) -> go.Figure:
+    # Largest count at the top; a single series, so no legend.
+    rows = by_control.sort_values("Value", kind="stable")
+    figure = go.Figure(go.Bar(
+        x=rows["Value"], y=rows["Item"], orientation="h", marker_color=SERIES_COLOUR,
+        text=rows["Value"].astype(int), textposition="outside",
+        hovertemplate="%{y}: %{x:d}<extra></extra>"))
+    figure.update_layout(title="Exceptions by control", showlegend=False, barcornerradius=4,
+                         height=BAR_HEIGHT * len(rows) + 120, xaxis={"dtick": 1})
+    return figure
+
+
+def breach_css(moves: pd.DataFrame) -> pd.DataFrame:
+    css = pd.DataFrame("", index=moves.index, columns=moves.columns)
+    css.loc[moves["Breach"].fillna(False).astype(bool)] = tint_css(BREACH_TINT)
+    return css
+
+
+def tint_css(tint: str) -> str:
+    return f"background-color: #{tint}; color: {INK}"
+
+
+def show_table(table: pd.DataFrame | Styler) -> None:
+    frame = table.data if isinstance(table, Styler) else table
+    st.dataframe(table, hide_index=True, column_config=column_config(frame))
+
+
+def column_config(frame: pd.DataFrame) -> dict:
+    # Same formats as the Excel report, for the columns it formats.
+    config = {}
+    for column in frame.columns:
+        excel_format = COLUMN_FORMATS.get(column)
+        if excel_format == DATE_FORMAT:
+            config[column] = st.column_config.DateColumn(format=DATE_FORMAT)
+        elif excel_format:
+            config[column] = st.column_config.NumberColumn(format=NUMBER_FORMATS[excel_format])
+    return config
 
 
 main()
