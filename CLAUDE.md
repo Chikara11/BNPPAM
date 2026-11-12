@@ -312,8 +312,13 @@ For traceability, after each validated step append an entry to `AI_LOG.md`:
 
 Never delete or rewrite existing entries, especially the corrections.
 
+`AI_LOG.md` is a local file, ignored by git (`.gitignore`) and removed from
+the history: keep writing entries in it, never stage or commit it, until I
+decide otherwise.
+
 ## Git
 One commit per validated step, with a clear message. Commit only after my approval.
+Never stage `AI_LOG.md`.
 
 
 ## Environment and libraries
