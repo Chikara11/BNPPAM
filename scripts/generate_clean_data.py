@@ -62,7 +62,6 @@ SHARED_ASSET_TYPE = "CLO Debt"
 SHARED_CURRENCY = "USD"
 SHARED_SECURITY_COUNT = 2
 
-ALL_RATINGS = ["AAA", "AA", "A", "BBB", "BB", "B", "CCC"]
 RATINGS_BY_ASSET_TYPE = {
     "CLO Debt": ["AAA", "AA", "A", "BBB", "BB", "B"],
     "ABS": ["AAA", "AA", "A", "BBB"],
@@ -113,8 +112,6 @@ TRANCHE_BY_RATING = {"AAA": "A", "AA": "B", "A": "C", "BBB": "D", "BB": "E", "B"
 EQUITY_TRANCHE = "Sub"
 ABS_KINDS = ["Auto", "Consumer", "Leasing"]
 
-PRICE_SOURCES = ["Pricing Agent", "Broker Quote", "Evaluated Price"]
-PREVIOUS_PRICE_KEY = ["ISIN", "PreviousDate"]
 LATEST_PRICE_LAG_DAYS = 7
 OLDER_PRICE_LAG_DAYS = 14
 OLDER_PRICE_SHARE = 0.5
@@ -130,8 +127,6 @@ FEE_RANGE = (-10_000.0, -2_000.0)
 FEE_OFFSET_DAYS = (1, 60)
 
 CONFIRMED_WINDOW_DAYS = 10  # Confirmed: VD to VD + 10 days inclusive
-
-ISIN_PATTERN = re.compile(r"^SYN\d{9}$")
 
 # Column types (data_spec.md): used by invariant 1 and to read files back.
 COLUMN_TYPES = {
@@ -304,7 +299,7 @@ def build_positions(securities: pd.DataFrame, rng: np.random.Generator,
 # Previous prices
 # -----------------------------------------------------------------------------
 def build_previous_prices(securities: pd.DataFrame, rng: np.random.Generator,
-                          columns: list) -> pd.DataFrame:
+                          columns: list, price_sources: list) -> pd.DataFrame:
     latest_date = VALUATION_DATE - pd.Timedelta(days=LATEST_PRICE_LAG_DAYS)
     older_date = VALUATION_DATE - pd.Timedelta(days=OLDER_PRICE_LAG_DAYS)
     rows = []
@@ -313,7 +308,7 @@ def build_previous_prices(securities: pd.DataFrame, rng: np.random.Generator,
             "ISIN": security["ISIN"],
             "PreviousDate": latest_date,
             "PreviousPrice": security["PreviousPrice"],
-            "PriceSource": str(rng.choice(PRICE_SOURCES)),
+            "PriceSource": str(rng.choice(price_sources)),
         })
         if rng.random() < OLDER_PRICE_SHARE:
             older_return = draw_truncated_return(security["AssetType"], rng)
@@ -321,7 +316,7 @@ def build_previous_prices(securities: pd.DataFrame, rng: np.random.Generator,
                 "ISIN": security["ISIN"],
                 "PreviousDate": older_date,
                 "PreviousPrice": round(security["PreviousPrice"] / (1 + older_return), 2),
-                "PriceSource": str(rng.choice(PRICE_SOURCES)),
+                "PriceSource": str(rng.choice(price_sources)),
             })
     return pd.DataFrame(rows)[columns]
 
@@ -450,8 +445,9 @@ def check_unique_keys(positions: pd.DataFrame, previous_prices: pd.DataFrame,
     position_key = config["keys"]["position_unique"]
     fail_if_any(positions[positions.duplicated(position_key, keep=False)], 2,
                 f"duplicate positions on {position_key}")
-    fail_if_any(previous_prices[previous_prices.duplicated(PREVIOUS_PRICE_KEY, keep=False)], 2,
-                f"duplicate previous prices on {PREVIOUS_PRICE_KEY}")
+    price_key = config["keys"]["previous_price_unique"]
+    fail_if_any(previous_prices[previous_prices.duplicated(price_key, keep=False)], 2,
+                f"duplicate previous prices on {price_key}")
 
 
 def check_missing_values(files: dict) -> None:
@@ -466,9 +462,8 @@ def check_missing_values(files: dict) -> None:
 
 def check_allowed_values_and_portfolio_layout(files: dict, config: dict) -> None:
     """Invariant 4."""
-    allowed = dict(config["allowed_values"])
-    allowed["Portfolio"] = list(PORTFOLIO_RULES)
-    allowed["PriceSource"] = PRICE_SOURCES
+    allowed = config["allowed_values"]
+    isin_pattern = re.compile(config["isin_pattern"])
     for name, data in files.items():
         for column, values in allowed.items():
             if column in data.columns:
@@ -476,12 +471,9 @@ def check_allowed_values_and_portfolio_layout(files: dict, config: dict) -> None
                 present = ~is_missing(data[column])
                 fail_if_any(data[present & ~data[column].isin(values)], 4,
                             f"{name}.{column} outside {values}")
-        bad_isin = ~data["ISIN"].map(lambda isin: bool(ISIN_PATTERN.match(str(isin))))
-        fail_if_any(data[bad_isin], 4, f"{name}.ISIN does not match {ISIN_PATTERN.pattern}")
+        bad_isin = ~data["ISIN"].map(lambda isin: bool(isin_pattern.fullmatch(str(isin))))
+        fail_if_any(data[bad_isin], 4, f"{name}.ISIN does not match {isin_pattern.pattern}")
     positions = files["positions"]
-    rating_present = positions["Rating"].notna()
-    fail_if_any(positions[rating_present & ~positions["Rating"].isin(ALL_RATINGS)], 4,
-                f"Rating outside {ALL_RATINGS}")
     outside_layout = positions.apply(
         lambda row: row["AssetType"] not in PORTFOLIO_RULES[row["Portfolio"]]["asset_types"]
         or row["Currency"] not in PORTFOLIO_RULES[row["Portfolio"]]["currencies"], axis=1)
@@ -566,10 +558,11 @@ def check_cashflow_links(positions: pd.DataFrame, cashflows: pd.DataFrame,
                 "cashflow currency differs from position currency")
     fail_if_any(linked[~(linked["CashflowDate"] <= linked["MaturityDate"])], 9,
                 "cashflow dated after the position MaturityDate")
-    inflow = linked["CashflowType"].isin(["Coupon", "Principal"])
-    fail_if_any(linked[inflow & ~(linked["Amount"] > 0)], 9, "Coupon/Principal amount not > 0")
-    fee = linked["CashflowType"] == "Fee"
-    fail_if_any(linked[fee & ~(linked["Amount"] < 0)], 9, "Fee amount not < 0")
+    sign = linked["CashflowType"].map(config["amount_sign"])
+    fail_if_any(linked[(sign == "positive") & ~(linked["Amount"] > 0)], 9,
+                "inflow amount not > 0 (amount_sign)")
+    fail_if_any(linked[(sign == "negative") & ~(linked["Amount"] < 0)], 9,
+                "outflow amount not < 0 (amount_sign)")
 
 
 def check_cashflow_statuses(cashflows: pd.DataFrame) -> None:
@@ -715,7 +708,8 @@ def main() -> None:
 
     securities = build_securities(rng)
     positions = build_positions(securities, rng, columns["positions"])
-    previous_prices = build_previous_prices(securities, rng, columns["previous_prices"])
+    previous_prices = build_previous_prices(securities, rng, columns["previous_prices"],
+                                            config["allowed_values"]["PriceSource"])
     cashflows = build_cashflows(positions, securities, rng, columns["cashflows"])
 
     run_all_checks(positions, previous_prices, cashflows, config)

@@ -21,6 +21,8 @@ import pandas as pd
 
 from generate_clean_data import (
     CONFIG_PATH,
+    LATEST_PRICE_LAG_DAYS,
+    OLDER_PRICE_LAG_DAYS,
     OUTPUT_DIR as CLEAN_DIR,
     REPO_ROOT,
     VALUATION_DATE,
@@ -35,8 +37,8 @@ MANIFEST_PATH = REPO_ROOT / "docs" / "anomaly_manifest.xlsx"
 FILE_NAMES = ["positions", "previous_prices", "cashflows"]
 
 SHARED_ISINS = {"SYN000000018", "SYN000000019"}
-LATEST_PRICE_DATE = VALUATION_DATE - pd.Timedelta(days=7)
-OLDER_PRICE_DATE = VALUATION_DATE - pd.Timedelta(days=14)
+LATEST_PRICE_DATE = VALUATION_DATE - pd.Timedelta(days=LATEST_PRICE_LAG_DAYS)
+OLDER_PRICE_DATE = VALUATION_DATE - pd.Timedelta(days=OLDER_PRICE_LAG_DAYS)
 BOOK_PRICE_OFFSET = 0.50  # price cases: BookPrice = new MarketPrice + 0.50
 PCT_DECIMALS = 6  # CLAUDE.md exception rule 7
 
