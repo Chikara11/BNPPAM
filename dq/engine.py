@@ -30,6 +30,12 @@ class Results:
 
 
 def run(data: InputData, config: Config) -> Results:
+    """Run the engine on loaded inputs: the only entry point.
+
+    Checks the registry, builds the context, keeps the positions at the
+    reference date, runs the enabled controls in config.yaml order, sorts and
+    numbers the exceptions, then computes the analytics. Returns Results.
+    """
     check_registry(config)
     ctx = build_context(data, config)
     data = positions_at_reference_date(data, ctx)

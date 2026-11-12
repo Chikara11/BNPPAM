@@ -13,6 +13,12 @@ from dq.schema import EXCEPTION_COLUMNS, conform, empty_exceptions
 def make_exceptions(rows: pd.DataFrame, control_id: str, ctx: Context, file: str, field: str,
                     *, observed: pd.Series | None = None,
                     comment: str | pd.Series) -> pd.DataFrame:
+    """Build one exception per row of `rows` in the common exception format.
+
+    Severity and AnomalyType come from config.yaml; Portfolio, ISIN,
+    SecurityName and SourceRow from the row; `observed` (aligned on rows)
+    becomes ObservedValue as text. Returns output_spec.md section 1.
+    """
     if rows.empty:
         return empty_exceptions()
     settings = ctx.config.controls[control_id]

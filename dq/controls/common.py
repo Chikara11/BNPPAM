@@ -28,6 +28,12 @@ def evaluated_rows(data: InputData, file: str, ctx: Context) -> pd.Series:
 
 
 def check_missing_value(data: InputData, ctx: Context) -> pd.DataFrame:
+    """MISSING_VALUE: empty required cell without a dedicated MISSING_* control.
+
+    Returns one exception per cell, in the 3 files. ISIN, MarketPrice and
+    Rating of positions have their own control and unreadable cells are
+    INVALID_VALUE (exception rules 2 and 10).
+    """
     found = []
     for file in INPUT_FILES:
         frame = getattr(data, file)
@@ -48,8 +54,12 @@ def check_missing_value(data: InputData, ctx: Context) -> pd.DataFrame:
 
 
 def check_invalid_value(data: InputData, ctx: Context) -> pd.DataFrame:
-    # Rules 9, 10, 11 and the ISIN format of rule 1. Empty cells are never
-    # reported here: they belong to a MISSING_* control (rule 2).
+    """INVALID_VALUE: every value that is present but wrong, in the 3 files.
+
+    Returns one exception per cell: empty rows (rule 11), unreadable cells
+    (rule 10), ISIN format (rule 1), values outside allowed_values, invalid
+    dates (rule 9), amount signs. Empty cells are never reported here (rule 2).
+    """
     return combine_exceptions(
         empty_row_exceptions(data, ctx)
         + parse_issue_exceptions(data, ctx)
@@ -61,7 +71,11 @@ def check_invalid_value(data: InputData, ctx: Context) -> pd.DataFrame:
 
 
 def check_invalid_price(data: InputData, ctx: Context) -> pd.DataFrame:
-    # Rules 3 and 8: a present price <= 0, one exception per field.
+    """INVALID_PRICE: MarketPrice, BookPrice or PreviousPrice present and <= 0.
+
+    Returns one exception per invalid field, named in Field (exception rules 3
+    and 8).
+    """
     found = []
     for file, columns in PRICE_FIELDS.items():
         frame = getattr(data, file)

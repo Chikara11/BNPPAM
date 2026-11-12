@@ -18,6 +18,12 @@ class Context:
 
 
 def build_context(data: InputData, config: Config) -> Context:
+    """Build the Context of a run: config, reference date and horizon end.
+
+    Reference date = reference_date of the config, else the latest valid
+    ValuationDate; InputSchemaError if there is neither (CLAUDE.md "Reference
+    date"). Also counts the position rows at another date, which are ignored.
+    """
     reference_date = resolve_reference_date(data.positions, config)
     dates = data.positions["ValuationDate"]
     ignored = int((dates.notna() & (dates != reference_date)).sum())
@@ -41,8 +47,12 @@ def resolve_reference_date(positions: pd.DataFrame, config: Config) -> pd.Timest
 
 
 def positions_at_reference_date(data: InputData, ctx: Context) -> InputData:
-    # Rows with an empty or unparseable ValuationDate are kept, so that the
-    # controls report them instead of dropping them silently.
+    """Return `data` with only the positions dated at the reference date.
+
+    Rows with an empty or unparseable ValuationDate are kept, so that the
+    controls report them instead of dropping them silently (CLAUDE.md "Data
+    policy": never silently repair).
+    """
     dates = data.positions["ValuationDate"]
     keep = dates.isna() | (dates == ctx.reference_date)
     return dataclasses.replace(data, positions=data.positions.loc[keep])

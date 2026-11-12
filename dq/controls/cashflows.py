@@ -12,9 +12,12 @@ from dq.schema import STATUS_FORECAST
 
 
 def check_unmatched_cashflow(data: InputData, ctx: Context) -> pd.DataFrame:
-    # Rule 4: Portfolio + ISIN must exist in the positions; never a row join.
-    # An empty Portfolio or ISIN is reported by MISSING_VALUE, a bad ISIN or a
-    # Portfolio outside the allowed list by INVALID_VALUE, not here.
+    """UNMATCHED_CASHFLOW: no position at the reference date with this Portfolio + ISIN.
+
+    Returns one exception per cashflow. Matching is a membership test, never a
+    row join (exception rule 4). An empty, badly formatted or non-allowed key
+    value is reported by MISSING_VALUE or INVALID_VALUE, not here.
+    """
     key = ctx.config.keys["cashflow_to_position"]
     cashflows = data.cashflows
     unmatched = (matchable(data, ctx) & allowed_portfolio(cashflows, ctx)
@@ -28,6 +31,11 @@ def check_unmatched_cashflow(data: InputData, ctx: Context) -> pd.DataFrame:
 
 
 def check_duplicate_cashflow(data: InputData, ctx: Context) -> pd.DataFrame:
+    """DUPLICATE_CASHFLOW: same cashflow_unique key on several rows.
+
+    Returns one exception per duplicated key (exception rule 5). Rows with an
+    incomplete key or a bad ISIN are not compared (rules 1 and 12).
+    """
     candidates = duplicate_candidates(data, "cashflows", ctx)
     rows = with_security_name(data, data.cashflows[candidates], ctx)
     return make_duplicate_exceptions(rows, ctx.config.keys["cashflow_unique"],
@@ -35,8 +43,12 @@ def check_duplicate_cashflow(data: InputData, ctx: Context) -> pd.DataFrame:
 
 
 def check_past_forecast_cashflow(data: InputData, ctx: Context) -> pd.DataFrame:
-    # "Past-dated" = strictly before the reference date. A Status outside the
-    # allowed values (e.g. " Forecast") is reported by INVALID_VALUE only.
+    """PAST_FORECAST_CASHFLOW: Status Forecast and CashflowDate before the reference date.
+
+    Returns one exception per cashflow. Past-dated = strictly before the
+    reference date (CLAUDE.md "Reference date"); a Status outside the allowed
+    values (e.g. " Forecast") is reported by INVALID_VALUE only.
+    """
     cashflows = data.cashflows
     past = (evaluated_rows(data, "cashflows", ctx) & (cashflows["Status"] == STATUS_FORECAST)
             & (cashflows["CashflowDate"] < ctx.reference_date))
@@ -50,9 +62,12 @@ def check_past_forecast_cashflow(data: InputData, ctx: Context) -> pd.DataFrame:
 
 
 def check_currency_mismatch(data: InputData, ctx: Context) -> pd.DataFrame:
-    # Rule 6: an unmatched cashflow has no position currency, so it is never
-    # compared. A currency outside the allowed list (on either side) is
-    # reported by INVALID_VALUE only.
+    """CURRENCY_MISMATCH: cashflow currency differs from its position currency.
+
+    Returns one exception per cashflow. Only matched cashflows are compared
+    (exception rule 6), with the first occurrence of a duplicated position
+    (rule 12); a currency outside the allowed list is INVALID_VALUE only.
+    """
     allowed = ctx.config.allowed_values["Currency"]
     cashflows = data.cashflows
     currency = cashflows["Currency"]

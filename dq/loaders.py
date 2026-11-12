@@ -31,6 +31,12 @@ class InputData:
 
 def load_inputs(positions: Source, previous_prices: Source, cashflows: Source,
                 config: Config) -> InputData:
+    """Read the 3 Excel files (paths or uploaded files) and convert their types.
+
+    Returns InputData: the 3 DataFrames with SourceRow, plus parse_issues for
+    the cells that failed conversion (exception rule 10). A missing required
+    column raises InputSchemaError naming the file and the columns.
+    """
     sources = {"positions": positions, "previous_prices": previous_prices,
                "cashflows": cashflows}
     frames, issues = {}, []
@@ -137,12 +143,22 @@ def parse_issues_of(data: InputData, file: str, column: str) -> pd.DataFrame:
 
 
 def truly_missing(data: InputData, file: str, column: str) -> pd.Series:
+    """Bool Series aligned on the file: the cell is empty and has no parse issue.
+
+    A value that could not be read is reported by INVALID_VALUE, never by a
+    MISSING_* control (exception rule 10).
+    """
     frame = getattr(data, file)
     unparsed = parse_issues_of(data, file, column)["SourceRow"]
     return frame[column].isna() & ~frame["SourceRow"].isin(unparsed)
 
 
 def empty_rows(data: InputData, file: str) -> pd.Series:
+    """Bool Series aligned on the file: every column of the row is empty.
+
+    Such a row is reported once, by INVALID_VALUE, and skipped by every other
+    control (exception rule 11).
+    """
     frame = getattr(data, file)
     issues = data.parse_issues
     unparsed = issues.loc[issues["File"] == file, "SourceRow"]

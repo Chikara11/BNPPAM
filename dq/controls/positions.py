@@ -10,8 +10,12 @@ from dq.loaders import InputData, truly_missing
 
 
 def check_missing_isin(data: InputData, ctx: Context) -> pd.DataFrame:
-    # Rule 10: a non-text ISIN is a parse issue, reported by INVALID_VALUE.
-    # Rule 11: an empty row is reported once, by INVALID_VALUE.
+    """MISSING_ISIN: positions whose ISIN is empty.
+
+    Returns one exception per row (exception rule 1). A non-text ISIN is a
+    parse issue (rule 10) and an empty row is reported by INVALID_VALUE
+    (rule 11), not here.
+    """
     missing = evaluated_rows(data, "positions", ctx) & truly_missing(data, "positions", "ISIN")
     return make_exceptions(
         data.positions[missing], "MISSING_ISIN", ctx, "positions", "ISIN",
@@ -21,8 +25,12 @@ def check_missing_isin(data: InputData, ctx: Context) -> pd.DataFrame:
 
 
 def check_duplicate_position(data: InputData, ctx: Context) -> pd.DataFrame:
-    # Only complete keys with a valid ISIN are compared: an empty key column is
-    # reported by MISSING_ISIN or MISSING_VALUE, a bad ISIN by INVALID_VALUE.
+    """DUPLICATE_POSITION: same position_unique key on several rows.
+
+    Returns one exception per duplicated key (exception rule 5). Only complete
+    keys with a valid ISIN are compared: an empty key column is reported by
+    MISSING_ISIN or MISSING_VALUE, a bad ISIN by INVALID_VALUE (rule 1).
+    """
     candidates = duplicate_candidates(data, "positions", ctx)
     return make_duplicate_exceptions(
         data.positions[candidates], ctx.config.keys["position_unique"], "DUPLICATE_POSITION",
@@ -31,6 +39,11 @@ def check_duplicate_position(data: InputData, ctx: Context) -> pd.DataFrame:
 
 
 def check_missing_market_price(data: InputData, ctx: Context) -> pd.DataFrame:
+    """MISSING_MARKET_PRICE: positions whose MarketPrice is empty.
+
+    Returns one exception per row (exception rule 2). A price <= 0 is
+    INVALID_PRICE (rule 3), an unreadable one INVALID_VALUE (rule 10).
+    """
     missing = (evaluated_rows(data, "positions", ctx)
                & truly_missing(data, "positions", "MarketPrice"))
     return make_exceptions(
@@ -41,7 +54,11 @@ def check_missing_market_price(data: InputData, ctx: Context) -> pd.DataFrame:
 
 
 def check_invalid_nominal(data: InputData, ctx: Context) -> pd.DataFrame:
-    # Rule 3: an empty Nominal is MISSING_VALUE, only a present value <= 0 is invalid.
+    """INVALID_NOMINAL: positions whose Nominal is present and <= 0.
+
+    Returns one exception per row. An empty Nominal is MISSING_VALUE, not
+    invalid (exception rule 3).
+    """
     nominal = data.positions["Nominal"]
     invalid = evaluated_rows(data, "positions", ctx) & nominal.notna() & (nominal <= 0)
     rows = data.positions[invalid]
@@ -52,8 +69,12 @@ def check_invalid_nominal(data: InputData, ctx: Context) -> pd.DataFrame:
 
 
 def check_missing_rating(data: InputData, ctx: Context) -> pd.DataFrame:
-    # CLO Equity is not rated; an empty or unknown AssetType is reported by
-    # MISSING_VALUE or INVALID_VALUE, not here.
+    """MISSING_RATING: empty Rating on an asset type of rating_required_for.
+
+    Returns one exception per row (exception rule 2). CLO Equity may be
+    unrated; an empty or unknown AssetType is reported by MISSING_VALUE or
+    INVALID_VALUE, not here.
+    """
     positions = data.positions
     missing = (evaluated_rows(data, "positions", ctx)
                & positions["AssetType"].isin(ctx.config.rating_required_for)

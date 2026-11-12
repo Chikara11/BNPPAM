@@ -26,8 +26,12 @@ DUPLICATE_KEYS = {"positions": "position_unique", "previous_prices": "previous_p
 
 
 def price_movements(data: InputData, ctx: Context) -> pd.DataFrame:
-    # One row per position at the reference date (duplicates included, rule 4);
-    # an empty row is not a position (rule 11).
+    """One row per position at the reference date, with its price movement.
+
+    Returns output_spec.md section 2: PriceChangePct and Breach when computable
+    (exception rule 7), else the reason in MoveStatus. Duplicated positions are
+    kept (rule 4), empty rows are not positions (rule 11).
+    """
     moves = price_move_table(data, ctx)[~empty_rows(data, "positions")]
     breach_rank = np.where(moves["Breach"].fillna(False), 0, np.where(moves["Breach"].isna(), 2, 1))
     ordered = moves.assign(_breach=breach_rank, _size=-moves["PriceChangePct"].abs()).sort_values(
@@ -37,8 +41,12 @@ def price_movements(data: InputData, ctx: Context) -> pd.DataFrame:
 
 
 def upcoming_cashflows(data: InputData, ctx: Context) -> pd.DataFrame:
-    # reference date <= CashflowDate <= reference date + horizon, both
-    # inclusive, Status other than Paid. Every row counts, duplicates included.
+    """Cashflows from the reference date to reference date + horizon, not Paid.
+
+    Returns output_spec.md section 3, both bounds inclusive (CLAUDE.md
+    "Reference date"). Every row counts, duplicates included; SecurityName and
+    AssetType come from the matching position, empty when unmatched.
+    """
     cashflows = data.cashflows
     in_window = in_horizon(data, ctx)
     rows = cashflows[in_window]
@@ -62,6 +70,11 @@ def upcoming_cashflows(data: InputData, ctx: Context) -> pd.DataFrame:
 
 
 def data_quality(data: InputData, ctx: Context) -> pd.DataFrame:
+    """Completeness per input file and column.
+
+    Returns output_spec.md section 4. A Rating outside rating_required_for is
+    NotApplicable, not Missing; an unreadable cell is not complete either.
+    """
     rows = []
     for file in INPUT_FILES:
         frame = getattr(data, file)
@@ -88,6 +101,12 @@ def data_quality(data: InputData, ctx: Context) -> pd.DataFrame:
 
 
 def summary(exceptions: pd.DataFrame, data: InputData, ctx: Context) -> pd.DataFrame:
+    """Headline figures of the run, in long format.
+
+    Returns output_spec.md section 5. Amounts are totalled per currency, never
+    across currencies (CLAUDE.md "Financial assumptions"); duplicated rows are
+    shown in the Overview, never removed.
+    """
     moves = price_movements(data, ctx)
     upcoming = upcoming_cashflows(data, ctx)
     rows = []

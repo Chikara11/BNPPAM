@@ -78,6 +78,11 @@ class Config:
 
 
 def load_config(path: str | Path) -> Config:
+    """Read config.yaml with yaml.safe_load and build a validated Config.
+
+    Returns the Config. Raises ConfigError if the file cannot be read, is not
+    valid YAML or breaks a rule of config_from_dict (CLAUDE.md "Configuration").
+    """
     try:
         with open(path, encoding="utf-8") as file:
             raw = yaml.safe_load(file)
@@ -89,6 +94,11 @@ def load_config(path: str | Path) -> Config:
 
 
 def config_from_dict(raw: dict) -> Config:
+    """Validate a deep copy of `raw` and build a read-only Config.
+
+    Returns the Config; every problem found is listed in a single ConfigError.
+    The input dict is never kept or modified (CLAUDE.md "Configuration").
+    """
     if not isinstance(raw, Mapping):
         raise ConfigError("The config must be a mapping of settings.")
     raw = copy.deepcopy(dict(raw))
@@ -113,6 +123,11 @@ def config_from_dict(raw: dict) -> Config:
 
 
 def with_overrides(config: Config, overrides: Mapping) -> Config:
+    """Return a new Config with `overrides` deep-merged and re-validated.
+
+    Dicts are merged, lists and scalars replaced; an unknown key raises
+    ConfigError. The original config is never modified (architecture.md 4.1).
+    """
     if not isinstance(overrides, Mapping):
         raise ConfigError("Overrides must be a mapping, e.g. {'cashflow_horizon_days': 60}.")
     merged = thaw(config.raw)

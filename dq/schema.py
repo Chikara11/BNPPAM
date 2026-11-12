@@ -117,6 +117,11 @@ def empty_frame(columns: dict) -> pd.DataFrame:
 
 
 def empty_exceptions() -> pd.DataFrame:
+    """Return an empty exceptions frame.
+
+    Columns and dtypes of output_spec.md section 1, so that a control with
+    nothing to report still returns the common format.
+    """
     return empty_frame(EXCEPTION_COLUMNS)
 
 
