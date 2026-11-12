@@ -66,7 +66,8 @@ duplicate keys live in `config.yaml`. Never hardcode them in the code.
   |PriceChangePct| is strictly greater than the threshold.
 - Default thresholds: 5% for CLO Debt and ABS, 15% for CLO Equity.
 - CLO Equity may legitimately have no rating.
-- Amounts are never summed across currencies (no FX conversion).
+- Amounts are never summed across currencies (no FX conversion): totals are
+  always per currency, in the summary, the app and the report.
 
 ## Reference date
 - Reference date = latest ValuationDate in positions.xlsx (overridable in config.yaml).
@@ -136,6 +137,11 @@ The engine follows these rules:
    - PreviousDate >= reference date. Checked only on prices of securities
      held in positions: prices of securities not held are ignored by the
      engine (docs/data_spec.md section 2).
+10. A non-empty value that cannot be converted to its type (e.g. text in a
+    number or date column) is recorded by the loader in `parse_issues` and
+    raises only INVALID_VALUE, with the raw text as ObservedValue. MISSING_*
+    controls report only truly empty cells (empty, empty string or
+    whitespace only).
 
 ## Severity (defaults, configurable)
 Critical:
@@ -166,9 +172,13 @@ Information:
   Python strings) and numeric columns as `float64`, so that missing values
   and type checks behave the same everywhere.
 - Separate modules: loading, validation, business rules, reporting, UI.
+  Package `dq/` at the repo root; structure and contracts in
+  `docs/architecture.md`.
 - One rule = one function returning exceptions in a common format:
-  Severity, ControlID, AnomalyType, Source, Portfolio, ISIN, SecurityName,
-  Field, ObservedValue, Comment.
+  ExceptionID, Severity, ControlID, AnomalyType, Source, Portfolio, ISIN,
+  SecurityName, Field, ObservedValue, Comment, SourceRow.
+  `docs/output_spec.md` is the single detailed definition (names, order,
+  dtypes).
 - Keep calculations and exception detection deterministic.
 - Readable code over clever code: short functions, explicit names, no unnecessary classes.
 
@@ -190,6 +200,7 @@ Information:
 - Inject anomalies:    `python scripts/inject_anomalies.py` → `data/inputs/`
   (deliverable input files) and `docs/anomaly_manifest.xlsx`
 - Run tests:           `pytest -q`
+- Run the report:      `python scripts/run_report.py --inputs data/inputs --output output/report.xlsx`
 - Run the app:         `streamlit run app.py`
 
 Run the tests after every change and show the result.
@@ -220,3 +231,34 @@ Never delete or rewrite existing entries, especially the corrections.
 
 ## Git
 One commit per validated step, with a clear message. Commit only after my approval.
+
+
+## Environment and libraries
+
+- Python **3.12.15**, virtual environment in `.venv/`.
+- Pinned versions (`requirements.txt`). Do not upgrade, downgrade or add a
+  package without my approval.
+
+| Package | Version | Used for | Documentation |
+|---|---|---|---|
+| pandas | 3.1.1 | data loading and controls | https://pandas.pydata.org/docs/ |
+| numpy | 2.5.4 | numeric operations | https://numpy.org/doc/stable/ |
+| openpyxl | 3.1.5 | Excel read/write and report formatting | https://openpyxl.readthedocs.io/en/stable/ |
+| PyYAML | 6.0.3 | config.yaml (`yaml.safe_load` only) | https://pyyaml.org/wiki/PyYAMLDocumentation |
+| pytest | 9.2.0 | tests | https://docs.pytest.org/en/stable/ |
+| streamlit | 1.67.0 | web app | https://docs.streamlit.io/ |
+| plotly | 7.1.0 | charts in the app | https://plotly.com/python/ |
+
+Python reference: https://docs.python.org/3.12/
+Deployment: https://docs.streamlit.io/deploy/streamlit-community-cloud
+
+Rules:
+- When unsure about an API, check the documentation of the pinned version.
+  Do not rely on memory of older versions.
+- pandas 3: copy-on-write is the default (no chained assignment such as
+  `df[col][mask] = x`; use `df.loc[mask, col] = x`). Text columns are read as
+  `object` by our loaders (see docs/architecture.md).
+- Streamlit: use the current API (for example `width="stretch"`, not the
+  deprecated `use_container_width`). Run with `streamlit run app.py`.
+- Architecture: follow `docs/architecture.md`. Any change to it needs my
+  approval first.

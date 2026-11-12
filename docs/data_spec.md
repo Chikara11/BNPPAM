@@ -11,14 +11,15 @@ processing engine. Any change to a column, type or rule must be made here first.
 | Column names | Exactly as written below (case-sensitive, no trailing spaces) |
 | Dates | Excel date cells, no time component. Read as pandas `datetime64`, normalised to midnight |
 | Numbers | Excel numeric cells (never numbers stored as text). Read as `float64` |
-| Text | Trimmed strings. An empty cell or an empty string is treated as missing |
+| Text | Trimmed strings. An empty cell, an empty string or a whitespace-only cell is treated as missing. The loader does not trim: a value with leading or trailing spaces is kept as is and reported (INVALID_VALUE) if it is not an allowed value |
 | Currencies | ISO 4217 codes: `EUR`, `USD`, `GBP` |
 | Prices | Quoted per 100 of nominal (e.g. `98.5` = 98.5 % of face value) |
 | Identifiers | Synthetic, 12 characters: `SYN` + 9 digits (e.g. `SYN000000001`). Same length as an ISIN, clearly fictional, never a real ISIN |
 | Valuation date | A single valuation date per dataset: `2026-11-11` |
 
 Missing required columns stop processing. Invalid values (e.g. text in a numeric
-column) are reported as data quality exceptions, never silently corrected.
+column) are reported as data quality exceptions (INVALID_VALUE, with the raw
+text), never silently corrected.
 
 ---
 
