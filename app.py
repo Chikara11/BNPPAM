@@ -11,11 +11,11 @@ from pandas.io.formats.style import Styler
 from dq import (Config, ConfigError, InputData, InputSchemaError, RegistryError, Results,
                 load_config, load_inputs, run, with_overrides)
 from dq.config import INPUT_FILES, MAX_HORIZON_DAYS, SEVERITIES
-from dq.report import (AMOUNT_FORMAT, BREACH_TINT, COLUMN_BLOCK_TITLE, COLUMN_FORMATS,
-                       DATE_FORMAT, DIMENSION_BLOCK_TITLE, PLAUSIBILITY_NOTE, PRICE_FORMAT,
-                       SEVERITY_TINTS, UNMATCHED_TINT, write_report)
-from dq.schema import (COMPUTED, NO_PORTFOLIO, SECTION_BY_CONTROL, SECTION_BY_SEVERITY,
-                       SECTION_DISABLED_CONTROLS)
+from dq.report import (AMOUNT_FORMAT, BREACH_TINT, CHECKS_BLOCK_TITLE, COLUMN_BLOCK_TITLE,
+                       COLUMN_FORMATS, DATE_FORMAT, DIMENSION_BLOCK_TITLE, PLAUSIBILITY_NOTE,
+                       PRICE_FORMAT, SEVERITY_TINTS, UNMATCHED_TINT, write_report)
+from dq.schema import (COMPUTED, NO_ASSET_TYPE, NO_PORTFOLIO, SECTION_BY_CONTROL,
+                       SECTION_BY_SEVERITY, SECTION_DISABLED_CONTROLS)
 
 # Display only (architecture.md section 4.9): every number comes from
 # Results; the app filters and shows, it never computes.
@@ -161,6 +161,8 @@ def show_data_quality(results: Results) -> None:
     st.subheader(DIMENSION_BLOCK_TITLE)
     show_table(results.dimension_quality)
     st.caption(PLAUSIBILITY_NOTE)
+    st.subheader(CHECKS_BLOCK_TITLE)
+    show_table(results.checks_performed)
     st.subheader(COLUMN_BLOCK_TITLE)
     show_table(results.data_quality)
 
@@ -185,13 +187,15 @@ def show_summary(results: Results) -> None:
 
 def show_exceptions(exceptions: pd.DataFrame) -> None:
     # The filters only hide rows: no exception is added, removed or changed.
-    severity_column, control_column, portfolio_column = st.columns(3)
+    severity_column, control_column, portfolio_column, asset_type_column = st.columns(4)
     severities = severity_column.multiselect(
         "Severity", [severity for severity in SEVERITIES
                      if severity in set(exceptions["Severity"].astype(str))])
     controls = control_column.multiselect("Control", exceptions["ControlID"].unique().tolist())
     portfolio_text = exceptions["Portfolio"].fillna(NO_PORTFOLIO)
     portfolios = portfolio_column.multiselect("Portfolio", sorted(portfolio_text.unique()))
+    asset_type_text = exceptions["AssetType"].fillna(NO_ASSET_TYPE)
+    asset_types = asset_type_column.multiselect("AssetType", sorted(asset_type_text.unique()))
     shown = pd.Series(True, index=exceptions.index)  # an empty filter keeps every row
     if severities:
         shown &= exceptions["Severity"].astype(str).isin(severities)
@@ -199,6 +203,8 @@ def show_exceptions(exceptions: pd.DataFrame) -> None:
         shown &= exceptions["ControlID"].isin(controls)
     if portfolios:
         shown &= portfolio_text.isin(portfolios)
+    if asset_types:
+        shown &= asset_type_text.isin(asset_types)
     filtered = exceptions[shown]
     st.caption(f"{len(filtered)} of {len(exceptions)} exceptions")
     severity_style = filtered.style.map(

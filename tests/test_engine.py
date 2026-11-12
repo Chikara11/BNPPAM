@@ -133,7 +133,8 @@ def test_unknown_severity_is_rejected(input_data):
 def exceptions_frame(rows: list[dict]) -> pd.DataFrame:
     filler = {"ExceptionID": None, "ControlID": "X", "Dimension": "Validity", "AnomalyType": "x",
               "Source": "positions",
-              "ISIN": "SYN000000001", "SecurityName": None, "ObservedValue": None,
+              "ISIN": "SYN000000001", "SecurityName": None, "AssetType": None,
+              "ObservedValue": None,
               "Comment": "x", "Field": "F"}
     return conform(pd.DataFrame([{**filler, **row} for row in rows]), EXCEPTION_COLUMNS)
 

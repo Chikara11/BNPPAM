@@ -81,7 +81,9 @@ securitised-credit-dq/
 ├── data/large_clean/   data/large/     # large sample: clean base, injected
 ├── output/                   # generated reports (git-ignored)
 └── docs/                     # architecture.md, data_spec.md, output_spec.md,
-                              # anomaly_manifest.xlsx, large_manifest.xlsx
+                              # anomaly_manifest.xlsx, large_manifest.xlsx,
+                              # anomalies.md (generated from the manifest),
+                              # sample_report.xlsx, sample_report_large.xlsx
 ```
 
 `app.py` and the tests import `dq` directly (`import dq`): `streamlit run
@@ -299,6 +301,11 @@ Pure functions, same inputs as controls, returning the non-exception outputs:
   only;
 - `dimension_quality(exceptions, ctx)`: one row per dimension of config.yaml
   (enabled controls, exceptions, severity split; zeros included);
+- `checks_performed(exceptions, ctx)`: one row per control of config.yaml
+  (label, dimension, severity, enabled, exceptions; zeros included);
+- `exception_asset_types(exceptions, data, ctx)`: the AssetType of the
+  position each exception points to (row, Portfolio + ISIN or held ISIN),
+  used by the engine to fill the AssetType column;
 - `summary(exceptions, data, ctx)`: counts by severity, control, dimension,
   portfolio,
   and the headline figures of the executive summary. Upcoming totals leave
@@ -319,7 +326,8 @@ the price change formula and its rounding are those of `CLAUDE.md`.
 ### 4.7 `engine.py`
 - `run(data: InputData, config: Config) -> Results` is the only entry point.
 - Steps: check the registry → build context (one valuation date, section
-  4.3) → run enabled controls in the order of `config.yaml` → concatenate → sort (Severity, ControlID, Portfolio, ISIN,
+  4.3) → run enabled controls in the order of `config.yaml` → add the
+  AssetType of each exception's position → concatenate → sort (Severity, ControlID, Portfolio, ISIN,
   SourceRow, Field; empty values last) →
   assign `ExceptionID` → run analytics →
   return `Results`.
@@ -327,7 +335,7 @@ the price change formula and its rounding are those of `CLAUDE.md`.
   Information (not alphabetically).
 - `Results` (frozen dataclass): `reference_date`, `config`, `exceptions`,
   `price_movements`, `upcoming_cashflows`, `data_quality`,
-  `dimension_quality`, `summary`.
+  `dimension_quality`, `checks_performed`, `summary`.
 
 ### 4.8 `report.py`
 - `write_report(results: Results, path_or_buffer, *, generated_at=None) -> None`
@@ -341,10 +349,11 @@ the price change formula and its rounding are those of `CLAUDE.md`.
   = `true`).
 - The Executive Summary shows the reference date, the run timestamp, then
   `Results.summary` section by section.
-- The Data Quality sheet holds two blocks: "Checks by dimension"
-  (`Results.dimension_quality`, then the Plausibility note) and
-  "Completeness by column" (`Results.data_quality`), with the autofilter on
-  the second and no frozen header.
+- The Data Quality sheet holds three blocks: "Checks by dimension"
+  (`Results.dimension_quality`, then the Plausibility note), "Checks
+  performed" (`Results.checks_performed`) and "Completeness by column"
+  (`Results.data_quality`), with the autofilter on the last and no frozen
+  header.
 - Formatting only (headers, number formats, column widths, severity tint on
   the Severity cell, breach rows and unmatched cashflows highlighted, frozen
   header, filters). No
@@ -370,10 +379,11 @@ the price change formula and its rounding are those of `CLAUDE.md`.
   reference-date override. The horizon input is capped at
   `MAX_HORIZON_DAYS`. The engine re-runs on every change.
 - Tabs: Summary (severity metrics, exceptions-by-control chart, every
-  `Results.summary` section), Exceptions (filters by severity, control, portfolio;
-  they only hide rows), Price Movements, Cashflows {N}D, Data Quality
-  ("Checks by dimension" with the Plausibility note, then "Completeness by
-  column", the same titles and note as the report, from `report.py`).
+  `Results.summary` section), Exceptions (filters by severity, control,
+  portfolio, AssetType; they only hide rows), Price Movements, Cashflows
+  {N}D, Data Quality ("Checks by dimension" with the Plausibility note,
+  "Checks performed", then "Completeness by column", the same titles and
+  note as the report, from `report.py`).
 - Price Movements chart: one dot strip per asset type (the thresholds
   differ), one dot per computed position on the x axis (change in %),
   breach / within threshold colours with a legend, dashed ±threshold lines,

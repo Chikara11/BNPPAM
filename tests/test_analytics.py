@@ -5,8 +5,8 @@ from dq.analytics import data_quality, price_movements, upcoming_cashflows
 from dq.config import with_overrides
 from dq.context import build_context
 from dq.engine import run
-from dq.schema import (DATA_QUALITY_COLUMNS, DIMENSION_QUALITY_COLUMNS, EXCEPTION_COLUMNS,
-                       PRICE_MOVEMENT_COLUMNS,
+from dq.schema import (CHECKS_PERFORMED_COLUMNS, DATA_QUALITY_COLUMNS,
+                       DIMENSION_QUALITY_COLUMNS, EXCEPTION_COLUMNS, PRICE_MOVEMENT_COLUMNS,
                        SUMMARY_COLUMNS, UPCOMING_CASHFLOW_COLUMNS, empty_frame)
 from helpers import CONFIG, cashflow, make_data, parse_issue, position, price
 
@@ -39,6 +39,7 @@ def test_every_output_conforms_to_the_schema(input_results):
                             ("upcoming_cashflows", UPCOMING_CASHFLOW_COLUMNS),
                             ("data_quality", DATA_QUALITY_COLUMNS),
                             ("dimension_quality", DIMENSION_QUALITY_COLUMNS),
+                            ("checks_performed", CHECKS_PERFORMED_COLUMNS),
                             ("summary", SUMMARY_COLUMNS)]:
         frame = getattr(input_results, output)
         assert list(frame.columns) == list(columns)
@@ -357,3 +358,54 @@ def test_summary_lists_the_disabled_controls():
     disabled = summary[summary["Section"] == "Disabled controls"]
     assert list(zip(disabled["Item"], disabled["Value"])) == [("MISSING_ISIN", 1.0)]
     assert "Disabled controls" not in run(data, CONFIG).summary["Section"].tolist()
+
+
+def test_abs_change_is_the_price_difference_rounded_to_2_decimals(input_results, manifest):
+    # A06: 98.00 -> 91.00
+    values = manifest_values(manifest, "A06")
+    move = move_of(input_results, values["ISIN"])
+    assert move["AbsChange"] == round(values["MarketPrice"] - values["PreviousPrice (VD-7)"], 2)
+    not_computed = input_results.price_movements["MoveStatus"] != "Computed"
+    assert input_results.price_movements.loc[not_computed, "AbsChange"].isna().all()
+
+
+def test_abs_change_keeps_the_exact_difference_for_the_percentage():
+    data = make_data([position(MarketPrice=98.756)], previous_prices=[price(PreviousPrice=99.1)])
+    move = price_movements(data, build_context(data, CONFIG)).iloc[0]
+    assert move["AbsChange"] == -0.34
+    assert move["PriceChangePct"] == round((98.756 - 99.1) / 99.1 * 100, 6)
+
+
+def test_nominal_total_counts_valid_nominals_in_allowed_currencies_only():
+    # Same exclusions as market value for the nominal itself: <= 0, empty or
+    # unknown currency; a position without market price still holds its nominal.
+    data = make_data([position(), position(Portfolio="CLO_GLOBAL_02", MarketPrice=None),
+                      position(Portfolio="MULTI_USD_04", Nominal=-1.0),
+                      position(Portfolio="ABS_EUROPE_03", Currency="CHF")])
+    totals = run(data, CONFIG).summary
+    nominal = totals[totals["Section"] == "Nominal total by currency"]
+    assert list(zip(nominal["Currency"], nominal["Value"])) == [("EUR", 2 * 5000000.0)]
+
+
+def test_exceptions_carry_the_asset_type_of_their_position():
+    # Positions: the row; cashflows: the matching Portfolio + ISIN (empty when
+    # unmatched); previous prices: the held position with that ISIN.
+    data = make_data([position(AssetType="ABS", Rating=None)],
+                     previous_prices=[price(), price()],
+                     cashflows=[cashflow(Status="Forecast", CashflowDate="2026-11-01"),
+                                cashflow(ISIN="SYN000000099")])
+    exceptions = run(data, CONFIG).exceptions.set_index("ControlID")
+    assert exceptions.loc["MISSING_RATING", "AssetType"] == "ABS"
+    assert exceptions.loc["DUPLICATE_PREVIOUS_PRICE", "AssetType"] == "ABS"
+    assert exceptions.loc["PAST_FORECAST_CASHFLOW", "AssetType"] == "ABS"
+    assert exceptions.loc["UNMATCHED_CASHFLOW", "AssetType"] is None
+
+
+def test_checks_performed_lists_every_control_with_its_exceptions(input_data):
+    config = with_overrides(CONFIG, {"controls": {"MISSING_ISIN": {"enabled": False}}})
+    checks = run(input_data, config).checks_performed
+    assert checks["ControlID"].tolist() == list(CONFIG.controls)
+    row = checks.set_index("ControlID").loc["MISSING_ISIN"]
+    assert (row["Enabled"], row["Exceptions"]) == (False, 0)
+    assert checks["Exceptions"].sum() == 14  # 15 on the fixture, A01 not checked
+    assert checks.set_index("ControlID").loc["PRICE_MOVE_ABOVE_THRESHOLD", "Exceptions"] == 3

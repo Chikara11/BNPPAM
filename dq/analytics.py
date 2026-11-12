@@ -8,17 +8,16 @@ import pandas as pd
 from dq.config import COLUMN_TYPES, INPUT_FILES, SEVERITIES
 from dq.context import Context
 from dq.loaders import InputData, empty_rows, parse_issues_of, truly_missing
-from dq.schema import (COMPUTED, CONFLICTING_PRICES, DATA_QUALITY_COLUMNS,
-                       DIMENSION_QUALITY_COLUMNS, DUPLICATE_ROW, INVALID_ISIN,
-                       INVALID_MARKET_PRICE, INVALID_PREVIOUS_PRICE, MISSING_ISIN,
-                       MISSING_MARKET_PRICE, MISSING_PREVIOUS_PRICE, NO_PORTFOLIO,
-                       NO_PRICE_HISTORY, NO_THRESHOLD, NO_USABLE_PRICE,
-                       PRICE_MOVEMENT_COLUMNS,
-                       SECTION_BY_CONTROL, SECTION_BY_DIMENSION, SECTION_BY_PORTFOLIO,
-                       SECTION_BY_SEVERITY, SECTION_DISABLED_CONTROLS,
-                       SECTION_MARKET_VALUE, SECTION_OVERVIEW, SECTION_PRICE_MOVES,
-                       SECTION_UPCOMING_CASHFLOWS, STATUS_PAID, SUMMARY_COLUMNS,
-                       UPCOMING_CASHFLOW_COLUMNS, conform)
+from dq.schema import (CHECKS_PERFORMED_COLUMNS, COMPUTED, CONFLICTING_PRICES,
+                       DATA_QUALITY_COLUMNS, DIMENSION_QUALITY_COLUMNS, DUPLICATE_ROW,
+                       INVALID_ISIN, INVALID_MARKET_PRICE, INVALID_PREVIOUS_PRICE,
+                       MISSING_ISIN, MISSING_MARKET_PRICE, MISSING_PREVIOUS_PRICE,
+                       NO_PORTFOLIO, NO_PRICE_HISTORY, NO_THRESHOLD, NO_USABLE_PRICE,
+                       PRICE_MOVEMENT_COLUMNS, SECTION_BY_CONTROL, SECTION_BY_DIMENSION,
+                       SECTION_BY_PORTFOLIO, SECTION_BY_SEVERITY, SECTION_DISABLED_CONTROLS,
+                       SECTION_MARKET_VALUE, SECTION_NOMINAL, SECTION_OVERVIEW,
+                       SECTION_PRICE_MOVES, SECTION_UPCOMING_CASHFLOWS, STATUS_PAID,
+                       SUMMARY_COLUMNS, UPCOMING_CASHFLOW_COLUMNS, conform)
 
 # Internal only, never in an output: a previous price was found but is not
 # yet checked for > 0.
@@ -152,6 +151,10 @@ def summary(exceptions: pd.DataFrame, data: InputData, ctx: Context) -> pd.DataF
         add(SECTION_BY_PORTFOLIO, portfolio, found.sum())
 
     # Amounts are totalled per currency only: never summed across currencies.
+    nominals = moves.assign(Nominal=valid_nominal(
+        moves["Nominal"], moves["Currency"].isin(allowed_currencies(ctx))))
+    for currency, total in totals_by_currency(nominals, "Nominal", ctx):
+        add(SECTION_NOMINAL, "Nominal", total, "amount", currency)
     for currency, total in totals_by_currency(moves, "MarketValue", ctx):
         add(SECTION_MARKET_VALUE, "Market value", total, "amount", currency)
     for currency, total in totals_by_currency(upcoming[totalled], "Amount", ctx):
@@ -184,9 +187,35 @@ def dimension_quality(exceptions: pd.DataFrame, ctx: Context) -> pd.DataFrame:
                    DIMENSION_QUALITY_COLUMNS)
 
 
+def checks_performed(exceptions: pd.DataFrame, ctx: Context) -> pd.DataFrame:
+    """One row per control of config.yaml, in that order, with its exceptions.
+
+    Returns output_spec.md section 4c: label, dimension, severity, whether the
+    control ran (Enabled) and its exception count, zeros included, so that the
+    reader sees every check, including those switched off.
+    """
+    rows = [{"ControlID": control_id, "AnomalyType": settings.label,
+             "Dimension": settings.dimension, "Severity": settings.severity,
+             "Enabled": settings.enabled,
+             "Exceptions": int((exceptions["ControlID"] == control_id).sum())}
+            for control_id, settings in ctx.config.controls.items()]
+    return conform(pd.DataFrame(rows, columns=list(CHECKS_PERFORMED_COLUMNS)),
+                   CHECKS_PERFORMED_COLUMNS)
+
+
+def price_change(market_price: pd.Series, previous_price: pd.Series) -> pd.Series:
+    # CLAUDE.md "Financial assumptions": PriceChange = MarketPrice - PreviousPrice.
+    return market_price - previous_price
+
+
 def price_change_pct(market_price: pd.Series, previous_price: pd.Series) -> pd.Series:
     # CLAUDE.md rule 7: in this order, rounded to 6 decimals before any comparison.
-    return ((market_price - previous_price) / previous_price * 100).round(6)
+    return (price_change(market_price, previous_price) / previous_price * 100).round(6)
+
+
+def valid_nominal(nominal: pd.Series, allowed_currency: pd.Series) -> pd.Series:
+    # Present and > 0 in an allowed currency: an invalid value never enters a total.
+    return nominal.where((nominal > 0) & allowed_currency)
 
 
 def market_value(nominal: pd.Series, market_price: pd.Series,
@@ -225,8 +254,10 @@ def price_move_table(data: InputData, ctx: Context) -> pd.DataFrame:
     for applies, reason in reversed(reasons):
         status[applies] = reason
     computed = status == COMPUTED
-    change = price_change_pct(market_price, previous_price).where(
-        computed | (status == NO_THRESHOLD))
+    shown = computed | (status == NO_THRESHOLD)
+    change = price_change_pct(market_price, previous_price).where(shown)
+    # rounded for display only: the percentage uses the exact difference
+    abs_change = price_change(market_price, previous_price).round(2).where(shown)
     breach = pd.Series(pd.NA, index=positions.index, dtype="boolean")
     breach[computed] = change[computed].abs() > threshold[computed]
     return pd.DataFrame({
@@ -235,7 +266,8 @@ def price_move_table(data: InputData, ctx: Context) -> pd.DataFrame:
         "Currency": positions["Currency"], "Rating": positions["Rating"],
         "Nominal": positions["Nominal"],
         "PreviousDate": previous["PreviousDate"], "PreviousPrice": previous_price,
-        "MarketPrice": market_price, "PriceChangePct": change, "ThresholdPct": threshold,
+        "MarketPrice": market_price, "PriceChangePct": change, "AbsChange": abs_change,
+        "ThresholdPct": threshold,
         "Breach": breach, "MoveStatus": status,
         "MarketValue": market_value(positions["Nominal"], market_price,
                                     positions["Currency"].isin(allowed_currencies(ctx))),
@@ -380,6 +412,24 @@ def position_values(data: InputData, rows: pd.DataFrame, column: str,
     # reindex rather than Series.map: map fails on an empty datetime lookup
     found = lookup.reindex(pd.MultiIndex.from_frame(rows[key]))
     return pd.Series(found.to_numpy(), index=rows.index, dtype=lookup.dtype)
+
+
+def exception_asset_types(exceptions: pd.DataFrame, data: InputData,
+                          ctx: Context) -> pd.Series:
+    # AssetType of the position an exception points to: the row itself
+    # (positions), the matching Portfolio + ISIN (cashflows) or the first held
+    # position with that ISIN (previous_prices); empty when there is none.
+    source = exceptions["Source"]
+    by_row = exceptions["SourceRow"].map(data.positions.set_index("SourceRow")["AssetType"])
+    by_key = position_values(data, exceptions, "AssetType", ctx)
+    held = matching_positions(data, ctx).drop_duplicates("ISIN").set_index("ISIN")["AssetType"]
+    by_isin = exceptions["ISIN"].map(held)
+    # object arrays: a lookup that finds nothing comes back as an Int64 or float column
+    found = pd.Series(np.select(
+        [source == "positions", source == "cashflows", source == "previous_prices"],
+        [by_row.astype(object), by_key.astype(object), by_isin.astype(object)], default=None),
+        index=exceptions.index, dtype=object)
+    return found.where(found.notna(), None)
 
 
 def not_applicable_cells(frame: pd.DataFrame, file: str, column: str,

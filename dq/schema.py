@@ -34,10 +34,12 @@ SECTION_BY_CONTROL = "Exceptions by control"
 SECTION_DISABLED_CONTROLS = "Disabled controls"  # only when a control is disabled
 SECTION_BY_DIMENSION = "Exceptions by dimension"
 SECTION_BY_PORTFOLIO = "Exceptions by portfolio"
+SECTION_NOMINAL = "Nominal total by currency"
 SECTION_MARKET_VALUE = "Market value by currency"
 SECTION_UPCOMING_CASHFLOWS = "Upcoming cashflows by currency"
 SECTION_PRICE_MOVES = "Price moves"
 NO_PORTFOLIO = "(none)"  # exceptions without a portfolio
+NO_ASSET_TYPE = "(none)"  # app filter: exceptions without a position (e.g. unmatched)
 
 EXCEPTION_COLUMNS = {
     "ExceptionID": "object",
@@ -49,6 +51,7 @@ EXCEPTION_COLUMNS = {
     "Portfolio": "object",
     "ISIN": "object",
     "SecurityName": "object",
+    "AssetType": "object",
     "Field": "object",
     "ObservedValue": "object",
     "Comment": "object",
@@ -67,6 +70,7 @@ PRICE_MOVEMENT_COLUMNS = {
     "PreviousPrice": "float64",
     "MarketPrice": "float64",
     "PriceChangePct": "float64",
+    "AbsChange": "float64",
     "ThresholdPct": "float64",
     "Breach": "boolean",
     "MoveStatus": "object",
@@ -114,6 +118,16 @@ DIMENSION_QUALITY_COLUMNS = {
     "Controls": "object",
     "Exceptions": "Int64",
     **{severity: "Int64" for severity in SEVERITIES},
+}
+
+# section 4c: one row per control of config.yaml, enabled or not
+CHECKS_PERFORMED_COLUMNS = {
+    "ControlID": "object",
+    "AnomalyType": "object",
+    "Dimension": "object",
+    "Severity": SEVERITY_DTYPE,
+    "Enabled": "boolean",
+    "Exceptions": "Int64",
 }
 
 SUMMARY_COLUMNS = {

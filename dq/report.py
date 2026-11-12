@@ -25,6 +25,7 @@ CASHFLOWS_SHEET = "Cashflows {days}D"  # days = cashflow_horizon_days of the run
 DATA_QUALITY_SHEET = "Data Quality"
 # Titles and note of the Data Quality sheet, also used by the app's tab.
 DIMENSION_BLOCK_TITLE = "Checks by dimension"
+CHECKS_BLOCK_TITLE = "Checks performed"
 COLUMN_BLOCK_TITLE = "Completeness by column"
 PLAUSIBILITY_NOTE = ("Plausibility = review alerts (e.g. large price moves), not necessarily "
                      "data errors.")
@@ -40,7 +41,7 @@ TIMESTAMP_FORMAT = "YYYY-MM-DD HH:MM:SS"
 PERCENT_COLUMNS = ("PriceChangePct", "ThresholdPct", "CompletenessPct")  # header + " %"
 COLUMN_FORMATS = {
     "Nominal": AMOUNT_FORMAT, "MarketValue": AMOUNT_FORMAT, "Amount": AMOUNT_FORMAT,
-    "PreviousPrice": PRICE_FORMAT, "MarketPrice": PRICE_FORMAT,
+    "PreviousPrice": PRICE_FORMAT, "MarketPrice": PRICE_FORMAT, "AbsChange": PRICE_FORMAT,
     "PreviousDate": DATE_FORMAT, "CashflowDate": DATE_FORMAT,
     **{column: PERCENT_FORMAT for column in PERCENT_COLUMNS},
 }
@@ -111,8 +112,8 @@ def write_frame(sheet: Worksheet, frame: pd.DataFrame, first_row: int) -> str:
 
 
 def write_data_quality(workbook: Workbook, results: Results) -> None:
-    # Two blocks on one sheet. Excel allows one autofilter per sheet: it goes
-    # on the column table; no frozen header, since the sheet has two.
+    # Three blocks on one sheet. Excel allows one autofilter per sheet: it goes
+    # on the column table; no frozen header, since the sheet has several.
     sheet = workbook.create_sheet(DATA_QUALITY_SHEET)
     write_cell(sheet, 1, 1, DIMENSION_BLOCK_TITLE).font = HEADER_FONT
     block = results.dimension_quality
@@ -122,9 +123,13 @@ def write_data_quality(workbook: Workbook, results: Results) -> None:
         sheet.cell(row=row, column=controls).alignment = WRAPPED
     note_row = 2 + len(results.dimension_quality) + 1  # header on row 2, then the rows
     write_cell(sheet, note_row, 1, PLAUSIBILITY_NOTE).font = NOTE_FONT
-    write_cell(sheet, note_row + 2, 1, COLUMN_BLOCK_TITLE).font = HEADER_FONT
-    sheet.auto_filter.ref = write_frame(sheet, results.data_quality, note_row + 3)
-    fit_columns(sheet, skip_rows={1, note_row, note_row + 2})
+    checks_row = note_row + 2
+    write_cell(sheet, checks_row, 1, CHECKS_BLOCK_TITLE).font = HEADER_FONT
+    write_frame(sheet, results.checks_performed, checks_row + 1)
+    columns_row = checks_row + 1 + len(results.checks_performed) + 2  # header, rows, blank
+    write_cell(sheet, columns_row, 1, COLUMN_BLOCK_TITLE).font = HEADER_FONT
+    sheet.auto_filter.ref = write_frame(sheet, results.data_quality, columns_row + 1)
+    fit_columns(sheet, skip_rows={1, note_row, checks_row, columns_row})
 
 
 def write_executive_summary(workbook: Workbook, results: Results,

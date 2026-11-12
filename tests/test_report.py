@@ -11,9 +11,11 @@ import pytest
 
 from dq.config import with_overrides
 from dq.engine import run
-from dq.report import (COLUMN_BLOCK_TITLE, DIMENSION_BLOCK_TITLE, PLAUSIBILITY_NOTE,
-                       write_report)
-from dq.schema import (DATA_QUALITY_COLUMNS, DIMENSION_QUALITY_COLUMNS, EXCEPTION_COLUMNS,
+from dq.loaders import load_inputs
+from dq.report import (CHECKS_BLOCK_TITLE, COLUMN_BLOCK_TITLE, DIMENSION_BLOCK_TITLE,
+                       PLAUSIBILITY_NOTE, write_report)
+from dq.schema import (CHECKS_PERFORMED_COLUMNS, DATA_QUALITY_COLUMNS,
+                       DIMENSION_QUALITY_COLUMNS, EXCEPTION_COLUMNS,
                        PRICE_MOVEMENT_COLUMNS, UPCOMING_CASHFLOW_COLUMNS)
 from helpers import CONFIG, CONFIG_PATH, REPO_ROOT
 
@@ -84,6 +86,7 @@ def test_report_values_are_copied_from_the_results(workbook, input_results):
     ("Price Movements", "MarketValue", "#,##0.00"),
     ("Price Movements", "MarketPrice", "0.00"),
     ("Price Movements", "PriceChangePct %", "0.00"),
+    ("Price Movements", "AbsChange", "0.00"),
     ("Price Movements", "PreviousDate", "YYYY-MM-DD"),
     ("Cashflows 30D", "CashflowDate", "YYYY-MM-DD"),
     ("Cashflows 30D", "Amount", "#,##0.00"),
@@ -224,18 +227,31 @@ def row_values(sheet, row: int, width: int) -> list:
     return [sheet.cell(row=row, column=column).value for column in range(1, width + 1)]
 
 
-def test_report_data_quality_sheet_has_the_dimension_block_then_the_column_table(
-        workbook, input_results):
+def column_table_header_row(results) -> int:
+    # dimension block (title, header, rows), note, blank, checks block
+    # (title, header, rows), blank, column table title
+    checks_row = 3 + len(results.dimension_quality) + 2
+    return checks_row + 1 + len(results.checks_performed) + 3
+
+
+def test_report_data_quality_sheet_has_the_three_blocks_in_order(workbook, input_results):
     sheet = workbook["Data Quality"]
     block, columns = input_results.dimension_quality, input_results.data_quality
+    checks = input_results.checks_performed
     assert sheet["A1"].value == DIMENSION_BLOCK_TITLE
     assert row_values(sheet, 2, len(block.columns)) == list(DIMENSION_QUALITY_COLUMNS)
     for offset, row in enumerate(block.itertuples(index=False)):
         assert row_values(sheet, 3 + offset, len(block.columns)) == list(row)
     note_row = 3 + len(block)
     assert sheet.cell(row=note_row, column=1).value == PLAUSIBILITY_NOTE
-    assert sheet.cell(row=note_row + 2, column=1).value == COLUMN_BLOCK_TITLE
-    header_row = note_row + 3
+    checks_row = note_row + 2
+    assert sheet.cell(row=checks_row, column=1).value == CHECKS_BLOCK_TITLE
+    assert row_values(sheet, checks_row + 1, len(checks.columns)) == list(
+        CHECKS_PERFORMED_COLUMNS)
+    for offset, row in enumerate(checks.itertuples(index=False)):
+        assert row_values(sheet, checks_row + 2 + offset, len(checks.columns)) == list(row)
+    header_row = column_table_header_row(input_results)
+    assert sheet.cell(row=header_row - 1, column=1).value == COLUMN_BLOCK_TITLE
     assert row_values(sheet, header_row, len(columns.columns)) == [
         f"{name} %" if name == "CompletenessPct" else name for name in DATA_QUALITY_COLUMNS]
     assert sheet.max_row == header_row + len(columns)
@@ -245,7 +261,7 @@ def test_report_data_quality_sheet_has_the_dimension_block_then_the_column_table
 def test_report_data_quality_filter_is_on_the_column_table_without_freeze(workbook,
                                                                           input_results):
     sheet = workbook["Data Quality"]
-    header_row = 3 + len(input_results.dimension_quality) + 3
+    header_row = column_table_header_row(input_results)
     assert sheet.freeze_panes is None
     assert sheet.auto_filter.ref == f"A{header_row}:H{header_row + len(input_results.data_quality)}"
 
@@ -262,3 +278,23 @@ def test_report_dimension_controls_wrap_in_their_cell(workbook, input_results):
     sheet = workbook["Data Quality"]
     rows = range(3, 3 + len(input_results.dimension_quality))
     assert all(sheet.cell(row=row, column=2).alignment.wrap_text for row in rows)
+
+
+def sheet_values(workbook: openpyxl.Workbook) -> dict[str, list[tuple]]:
+    # Every cell value; the run timestamp (Executive Summary B2) differs by design.
+    values = {sheet.title: [row for row in sheet.iter_rows(values_only=True)]
+              for sheet in workbook.worksheets}
+    values["Executive Summary"][1] = values["Executive Summary"][1][:1]
+    return values
+
+
+@pytest.mark.parametrize("folder, sample", [("inputs", "sample_report.xlsx"),
+                                            ("large", "sample_report_large.xlsx")])
+def test_committed_sample_report_matches_a_fresh_run(folder, sample):
+    # Regenerate with: python -m scripts.run_report --inputs data/<folder>
+    # --output docs/<sample> (README "Sample data").
+    path = REPO_ROOT / "data" / folder
+    data = load_inputs(path / "positions.xlsx", path / "previous_prices.xlsx",
+                       path / "cashflows.xlsx", CONFIG)
+    committed = openpyxl.load_workbook(REPO_ROOT / "docs" / sample)
+    assert sheet_values(committed) == sheet_values(written(run(data, CONFIG)))

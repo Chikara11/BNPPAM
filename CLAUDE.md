@@ -248,7 +248,8 @@ Information:
   `docs/architecture.md`.
 - One rule = one function returning exceptions in a common format:
   ExceptionID, Severity, ControlID, Dimension, AnomalyType, Source,
-  Portfolio, ISIN, SecurityName, Field, ObservedValue, Comment, SourceRow.
+  Portfolio, ISIN, SecurityName, AssetType, Field, ObservedValue, Comment,
+  SourceRow.
   `docs/output_spec.md` is the single detailed definition (names, order,
   dtypes).
 - Keep calculations and exception detection deterministic.
@@ -322,12 +323,17 @@ Before every commit
 ## Commands
 - Generate clean data: `python scripts/generate_clean_data.py` → `data/clean/`
 - Inject anomalies:    `python scripts/inject_anomalies.py` → `data/inputs/`
-  (deliverable input files) and `docs/anomaly_manifest.xlsx`
+  (deliverable input files), `docs/anomaly_manifest.xlsx` and its readable
+  table `docs/anomalies.md`
 - Large sample:        `python scripts/generate_large_sample.py` →
   `data/large_clean/`, `data/large/` and `docs/large_manifest.xlsx`
 - Run tests:           `pytest -q`
 - Run the report:      `python -m scripts.run_report --inputs data/inputs --output output/report.xlsx`
   (from the repo root, as a module, so that it can import `dq`)
+- Sample reports:      the same command with `--output docs/sample_report.xlsx`
+  (data/inputs) and `--output docs/sample_report_large.xlsx` (data/large);
+  committed, and checked against a fresh run by the tests: regenerate them
+  after any change to the engine or the report
 - Run the app:         `streamlit run app.py`
 
 Run the tests after every change and show the result.

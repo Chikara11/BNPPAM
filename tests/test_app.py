@@ -7,8 +7,8 @@ import pytest
 from streamlit.testing.v1 import AppTest
 
 from dq.config import MAX_HORIZON_DAYS
-from dq.report import (BREACH_TINT, COLUMN_BLOCK_TITLE, DIMENSION_BLOCK_TITLE, PLAUSIBILITY_NOTE,
-                       SEVERITY_TINTS, UNMATCHED_TINT)
+from dq.report import (BREACH_TINT, CHECKS_BLOCK_TITLE, COLUMN_BLOCK_TITLE,
+                       DIMENSION_BLOCK_TITLE, PLAUSIBILITY_NOTE, SEVERITY_TINTS, UNMATCHED_TINT)
 from helpers import REPO_ROOT
 
 APP = str(REPO_ROOT / "app.py")
@@ -54,6 +54,17 @@ def test_app_lowering_the_clo_equity_threshold_adds_an_alert():
     app.number_input(key="setting_CLO Equity").set_value(12.0).run()
     moves = exceptions_shown(app)
     assert (moves["ControlID"] == "PRICE_MOVE_ABOVE_THRESHOLD").sum() == 4  # + N01, -12.5 %
+
+
+def test_app_asset_type_filter_only_hides_rows():
+    app = started()
+    filters = {select.label: select for select in app.tabs[1].multiselect}
+    filters["AssetType"].select("CLO Equity").run()
+    shown = exceptions_shown(app)
+    assert set(shown["AssetType"]) == {"CLO Equity"} and len(shown) == 3  # A08, A13, A15
+    filters = {select.label: select for select in app.tabs[1].multiselect}
+    filters["AssetType"].unselect("CLO Equity").select("(none)").run()
+    assert exceptions_shown(app)["ControlID"].tolist() == ["UNMATCHED_CASHFLOW"]  # A12
 
 
 def test_app_warns_when_a_control_is_disabled():
@@ -190,9 +201,10 @@ def test_app_tables_use_the_report_number_formats():
     columns = json.loads(started().tabs[2].dataframe[0].proto.columns)
     formats = {name: columns[name]["type_config"]["format"]
                for name in ("Nominal", "MarketValue", "MarketPrice", "PriceChangePct",
-                            "PreviousDate")}
+                            "AbsChange", "PreviousDate")}
     assert formats == {"Nominal": "%,.2f", "MarketValue": "%,.2f", "MarketPrice": "%.2f",
-                       "PriceChangePct": "%.2f", "PreviousDate": "YYYY-MM-DD"}
+                       "PriceChangePct": "%.2f", "AbsChange": "%.2f",
+                       "PreviousDate": "YYYY-MM-DD"}
 
 
 def styled_rows(app: AppTest, tab: int, tint: str) -> set[str]:
@@ -263,12 +275,14 @@ def test_app_controls_column_is_wide():
     assert columns["Controls"]["width"] == "large"
 
 
-def test_app_data_quality_tab_shows_the_dimension_block_then_the_column_table():
+def test_app_data_quality_tab_shows_the_three_blocks_in_order():
     tab = started().tabs[4]
-    assert [header.value for header in tab.subheader] == [DIMENSION_BLOCK_TITLE,
-                                                          COLUMN_BLOCK_TITLE]
+    assert [header.value for header in tab.subheader] == [
+        DIMENSION_BLOCK_TITLE, CHECKS_BLOCK_TITLE, COLUMN_BLOCK_TITLE]
     assert PLAUSIBILITY_NOTE in [caption.value for caption in tab.caption]
-    block, columns = tab.dataframe[0].value, tab.dataframe[1].value
+    block, checks, columns = (tab.dataframe[0].value, tab.dataframe[1].value,
+                              tab.dataframe[2].value)
+    assert len(checks) == 15 and checks["Exceptions"].sum() == 15
     assert block["Dimension"].tolist()[0] == "Completeness" and len(block) == 6
     assert block["Exceptions"].sum() == 15
     assert "CompletenessPct" in columns.columns

@@ -27,6 +27,7 @@ class Results:
     upcoming_cashflows: pd.DataFrame
     data_quality: pd.DataFrame
     dimension_quality: pd.DataFrame
+    checks_performed: pd.DataFrame
     summary: pd.DataFrame
 
 
@@ -34,12 +35,15 @@ def run(data: InputData, config: Config) -> Results:
     """Run the engine on loaded inputs: the only entry point.
 
     Checks the registry, builds the context (one valuation date), runs the
-    enabled controls in config.yaml order, sorts and numbers the exceptions,
-    then computes the analytics. Returns Results.
+    enabled controls in config.yaml order, adds the AssetType of each
+    exception's position, sorts and numbers the exceptions, then computes the
+    analytics. Returns Results.
     """
     check_registry(config)
     ctx = build_context(data, config)
-    exceptions = assign_exception_ids(sort_exceptions(run_controls(data, ctx)))
+    found = run_controls(data, ctx)
+    found = found.assign(AssetType=analytics.exception_asset_types(found, data, ctx))
+    exceptions = assign_exception_ids(sort_exceptions(found))
     return Results(
         reference_date=ctx.reference_date,
         config=config,
@@ -48,6 +52,7 @@ def run(data: InputData, config: Config) -> Results:
         upcoming_cashflows=analytics.upcoming_cashflows(data, ctx),
         data_quality=analytics.data_quality(data, ctx),
         dimension_quality=analytics.dimension_quality(exceptions, ctx),
+        checks_performed=analytics.checks_performed(exceptions, ctx),
         summary=analytics.summary(exceptions, data, ctx),
     )
 

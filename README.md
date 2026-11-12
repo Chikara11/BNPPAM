@@ -36,7 +36,16 @@ an injected copy checked against an exact oracle.
 | Regenerate | `python scripts/generate_clean_data.py` then `python scripts/inject_anomalies.py` | `python scripts/generate_large_sample.py` |
 
 Rows per file, exceptions per control and rates: `docs/data_spec.md`,
-section "Datasets" (checked against the manifests by the tests).
+section "Datasets" (checked against the manifests by the tests). The 15
+anomalies and 4 no-alert cases of the fixture, in a readable table:
+`docs/anomalies.md`.
+
+Sample Excel reports, committed so they can be opened without running
+anything: `docs/sample_report.xlsx` (test fixture) and
+`docs/sample_report_large.xlsx` (large sample). The tests check that they
+equal a fresh run; regenerate them with
+`python -m scripts.run_report --inputs data/inputs --output docs/sample_report.xlsx`
+(and `data/large` -> `docs/sample_report_large.xlsx`).
 
 ## Deployed app
 

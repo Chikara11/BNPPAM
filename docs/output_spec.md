@@ -51,10 +51,11 @@ One row per exception. Format referenced by CLAUDE.md.
 | 7 | Portfolio | object | yes | |
 | 8 | ISIN | object | yes | Empty for MISSING_ISIN |
 | 9 | SecurityName | object | yes | Empty when unknown (e.g. unmatched cashflow) |
-| 10 | Field | object | no | Column checked; key columns joined with `+` for duplicates and unmatched cashflows |
-| 11 | ObservedValue | object | yes | Value as text (raw text for conversion failures) |
-| 12 | Comment | object | no | Plain-language explanation with the expected rule and, for multi-row exceptions, the Excel rows (the first 20, then `(+N more)`: an Excel cell holds 32,767 characters) |
-| 13 | SourceRow | Int64 | no | Excel row number (header = 1); first row for multi-row exceptions |
+| 10 | AssetType | object | yes | From the position the exception points to: the row (positions), the matching Portfolio + ISIN (cashflows), the first held position with that ISIN (previous_prices); empty when there is none (e.g. unmatched cashflow). Added by the engine after the controls |
+| 11 | Field | object | no | Column checked; key columns joined with `+` for duplicates and unmatched cashflows |
+| 12 | ObservedValue | object | yes | Value as text (raw text for conversion failures) |
+| 13 | Comment | object | no | Plain-language explanation with the expected rule and, for multi-row exceptions, the Excel rows (the first 20, then `(+N more)`: an Excel cell holds 32,767 characters) |
+| 14 | SourceRow | Int64 | no | Excel row number (header = 1); first row for multi-row exceptions |
 
 Sort order: Severity (Critical, Warning, Information), ControlID, Portfolio,
 ISIN, SourceRow, Field (last tie-breaker, e.g. two INVALID_PRICE on the same
@@ -83,11 +84,12 @@ cannot be computed.
 | 9 | PreviousPrice | float64 | yes | |
 | 10 | MarketPrice | float64 | yes | |
 | 11 | PriceChangePct | float64 | yes | `(MarketPrice - PreviousPrice) / PreviousPrice * 100`, rounded to 6 decimals; empty when not computed or on a duplicate row |
-| 12 | ThresholdPct | float64 | yes | Threshold of the asset type, from config.yaml |
-| 13 | Breach | boolean | yes | `abs(PriceChangePct) > ThresholdPct`; empty when not computable |
-| 14 | MoveStatus | object | no | See vocabulary below |
-| 15 | MarketValue | float64 | yes | `Nominal * MarketPrice / 100`, in the position currency. Empty when Nominal or MarketPrice is missing or <= 0, or when Currency is empty or not in `allowed_values.Currency`: an invalid value never enters a total |
-| 16 | SourceRow | Int64 | no | Row in positions |
+| 12 | AbsChange | float64 | yes | `MarketPrice - PreviousPrice` in price points, rounded to 2 decimals (display only: PriceChangePct uses the exact difference); empty when PriceChangePct is empty |
+| 13 | ThresholdPct | float64 | yes | Threshold of the asset type, from config.yaml |
+| 14 | Breach | boolean | yes | `abs(PriceChangePct) > ThresholdPct`; empty when not computable |
+| 15 | MoveStatus | object | no | See vocabulary below |
+| 16 | MarketValue | float64 | yes | `Nominal * MarketPrice / 100`, in the position currency. Empty when Nominal or MarketPrice is missing or <= 0, or when Currency is empty or not in `allowed_values.Currency`: an invalid value never enters a total |
+| 17 | SourceRow | Int64 | no | Row in positions |
 
 **[Decision]** `MoveStatus` vocabulary (exactly one per row; when several
 apply, the first in this list wins):
@@ -182,6 +184,22 @@ Notes:
 
 ---
 
+## 4c. `checks_performed`
+
+One row per control of `config.yaml`, in that order, enabled or not, so that
+the reader sees every check of the run and how many exceptions it raised.
+
+| # | Column | dtype | Nullable | Description |
+|---|---|---|---|---|
+| 1 | ControlID | object | no | Key in config.yaml |
+| 2 | AnomalyType | object | no | Control `label` from config.yaml |
+| 3 | Dimension | object | no | From config.yaml |
+| 4 | Severity | category (ordered) | no | From config.yaml |
+| 5 | Enabled | boolean | no | False: the control did not run (Exceptions = 0) |
+| 6 | Exceptions | Int64 | no | Exceptions raised by the control, zeros included |
+
+---
+
 ## 5. `summary`
 
 **[Decision]** Long format, so one table holds every headline figure and
@@ -212,11 +230,15 @@ Sections, in this order:
    order (zeros included).
 4. `Exceptions by portfolio`: every portfolio, plus `(none)` for exceptions
    without a portfolio.
+4b. `Nominal total by currency`: sum of Nominal where it is present and
+   > 0 and the Currency is allowed (same exclusions as market value for the
+   nominal itself; a position without a usable MarketPrice still holds its
+   nominal). Duplicated rows are counted twice, as in market value.
 5. `Market value by currency`: sum of MarketValue where computable.
 6. `Upcoming cashflows by currency`: sum of Amount in the horizon, without
    the cashflows excluded from totals (section 3).
 
-   Sections 5 and 6 list only the currencies of `allowed_values.Currency`,
+   Sections 4b, 5 and 6 list only the currencies of `allowed_values.Currency`,
    in that order: an amount in an empty or unknown currency is never
    totalled (same rule as a Nominal or price <= 0).
 7. `Price moves`: positions computed, breaches, not computable (every other
@@ -234,7 +256,7 @@ The reference date is not a row: it is `Results.reference_date`.
 | 2 | Exceptions | `exceptions`, severity colours, filters, frozen header |
 | 3 | Price Movements | `price_movements`, breaches highlighted |
 | 4 | Cashflows {N}D | `upcoming_cashflows`; N = horizon in days; unmatched cashflows highlighted with the Warning tint |
-| 5 | Data Quality | "Checks by dimension": `dimension_quality` (Controls wrapped in their cell), then the note "Plausibility = review alerts (e.g. large price moves), not necessarily data errors."; a blank row; "Completeness by column": `data_quality`. Autofilter on the column table only, no frozen header (Excel allows one filter per sheet) |
+| 5 | Data Quality | "Checks by dimension": `dimension_quality` (Controls wrapped in their cell), then the note "Plausibility = review alerts (e.g. large price moves), not necessarily data errors."; a blank row; "Checks performed": `checks_performed`; a blank row; "Completeness by column": `data_quality`. Autofilter on the column table only, no frozen header (Excel allows one filter per sheet) |
 | 6 | Parameters | Config used for the run: `Parameter`, `Value` (text), one row per setting |
 
 **[Decision]** Number formats: amounts `#,##0.00`, prices `0.00`,

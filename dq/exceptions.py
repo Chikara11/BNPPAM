@@ -36,6 +36,7 @@ def make_exceptions(rows: pd.DataFrame, control_id: str, ctx: Context, file: str
         "Portfolio": column_or_empty(rows, "Portfolio"),
         "ISIN": column_or_empty(rows, "ISIN"),
         "SecurityName": column_or_empty(rows, "SecurityName"),
+        "AssetType": None,  # filled by the engine, from the position (one place for 3 files)
         "Field": field,
         "ObservedValue": None if observed is None else observed.map(as_text),
         "Comment": comment,
