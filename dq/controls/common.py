@@ -6,7 +6,7 @@ from dq.analytics import first_occurrence, held_isins, position_values, valid_is
 from dq.config import COLUMN_TYPES, INPUT_FILES
 from dq.context import Context
 from dq.exceptions import combine_exceptions, make_exceptions
-from dq.loaders import InputData, empty_rows, truly_missing
+from dq.loaders import InputData, empty_rows, parse_issues_of, truly_missing
 
 # Rule 2: these columns have their own "missing" control, not MISSING_VALUE.
 DEDICATED_MISSING_CONTROLS = {"positions": ("ISIN", "MarketPrice", "Rating")}
@@ -84,12 +84,11 @@ def empty_row_exceptions(data: InputData, ctx: Context) -> list[pd.DataFrame]:
 
 def parse_issue_exceptions(data: InputData, ctx: Context) -> list[pd.DataFrame]:
     found = []
-    issues = data.parse_issues
     for file in INPUT_FILES:
         frame = getattr(data, file)
         scope = evaluated_rows(data, file, ctx)
         for column in COLUMN_TYPES[file]:
-            raw = issues[(issues["File"] == file) & (issues["Column"] == column)]
+            raw = parse_issues_of(data, file, column)
             if raw.empty:
                 continue
             column_scope = ~empty_rows(data, file) if column == "ISIN" else scope

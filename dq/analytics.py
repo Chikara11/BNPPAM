@@ -7,7 +7,7 @@ import pandas as pd
 
 from dq.config import COLUMN_TYPES, INPUT_FILES, SEVERITIES
 from dq.context import Context
-from dq.loaders import InputData, empty_rows, truly_missing
+from dq.loaders import InputData, empty_rows, parse_issues_of, truly_missing
 from dq.schema import (DATA_QUALITY_COLUMNS, PRICE_MOVEMENT_COLUMNS, SUMMARY_COLUMNS,
                        UPCOMING_CASHFLOW_COLUMNS, conform)
 
@@ -68,7 +68,6 @@ def upcoming_cashflows(data: InputData, ctx: Context) -> pd.DataFrame:
 
 def data_quality(data: InputData, ctx: Context) -> pd.DataFrame:
     rows = []
-    issues = data.parse_issues
     for file in INPUT_FILES:
         frame = getattr(data, file)
         for column in COLUMN_TYPES[file]:  # column order of data_spec.md
@@ -77,8 +76,9 @@ def data_quality(data: InputData, ctx: Context) -> pd.DataFrame:
             not_applicable = not_applicable_cells(frame, file, column, ctx)
             applicable = len(frame) - int(not_applicable.sum())
             missing = int((truly_missing(data, file, column) & ~not_applicable).sum())
-            parse_issues = int(((issues["File"] == file) & (issues["Column"] == column)
-                                & issues["SourceRow"].isin(frame["SourceRow"])).sum())
+            # only the rows analysed (positions: at the reference date)
+            parse_issues = int(parse_issues_of(data, file, column)["SourceRow"]
+                               .isin(frame["SourceRow"]).sum())
             # a cell that cannot be read is not complete either
             completeness = (round((applicable - missing - parse_issues) / applicable * 100, 2)
                             if applicable else np.nan)

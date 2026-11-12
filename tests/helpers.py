@@ -5,7 +5,8 @@ import pandas as pd
 from dq.config import COLUMN_TYPES, load_config
 from dq.context import build_context
 from dq.engine import run
-from dq.loaders import InputData, empty_parse_issues
+from dq.loaders import InputData
+from dq.schema import PARSE_ISSUE_COLUMNS, empty_frame
 
 # Small hand-built inputs for the unit tests, with the loader's columns and dtypes.
 
@@ -47,7 +48,7 @@ def make_data(positions: list[dict] | None = None, previous_prices: list[dict] |
         previous_prices=frame("previous_prices",
                               [PREVIOUS_PRICE] if previous_prices is None else previous_prices),
         cashflows=frame("cashflows", [CASHFLOW] if cashflows is None else cashflows),
-        parse_issues=empty_parse_issues() if parse_issues is None else parse_issues,
+        parse_issues=empty_frame(PARSE_ISSUE_COLUMNS) if parse_issues is None else parse_issues,
     )
 
 

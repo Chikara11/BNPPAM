@@ -101,10 +101,10 @@ def config_from_dict(raw: dict) -> Config:
             {asset_type: float(value)
              for asset_type, value in raw["price_move_thresholds_pct"].items()}),
         rating_required_for=tuple(raw["rating_required_for"]),
-        amount_sign=MappingProxyType(dict(raw["amount_sign"])),
-        allowed_values=freeze_lists(raw["allowed_values"]),
-        required_columns=freeze_lists(raw["required_columns"]),
-        keys=freeze_lists(raw["keys"]),
+        amount_sign=freeze(raw["amount_sign"]),
+        allowed_values=freeze(raw["allowed_values"]),
+        required_columns=freeze(raw["required_columns"]),
+        keys=freeze(raw["keys"]),
         controls=MappingProxyType(
             {control_id: ControlSettings(**settings)
              for control_id, settings in raw["controls"].items()}),
@@ -298,10 +298,6 @@ def allowed_asset_types(raw: dict) -> list[str]:
 def is_text_list(values: Any) -> bool:
     return (isinstance(values, list) and len(values) > 0
             and all(isinstance(value, str) for value in values))
-
-
-def freeze_lists(mapping: Mapping[str, list]) -> Mapping[str, tuple]:
-    return MappingProxyType({key: tuple(values) for key, values in mapping.items()})
 
 
 def freeze(value: Any) -> Any:

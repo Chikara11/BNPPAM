@@ -7,9 +7,9 @@ import openpyxl
 import pandas as pd
 import pytest
 
-from dq.config import load_config
-from dq.loaders import (COLUMN_TYPES, InputSchemaError, PARSE_ISSUE_COLUMNS, empty_rows,
-                        load_inputs, truly_missing)
+from dq.config import COLUMN_TYPES, load_config
+from dq.loaders import InputSchemaError, empty_rows, load_inputs, truly_missing
+from dq.schema import PARSE_ISSUE_COLUMNS
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 CONFIG = load_config(REPO_ROOT / "config.yaml")

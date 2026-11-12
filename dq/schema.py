@@ -69,6 +69,14 @@ DATA_QUALITY_COLUMNS = {
     "CompletenessPct": "float64",
 }
 
+# section 0: built by the loader, part of InputData
+PARSE_ISSUE_COLUMNS = {
+    "File": "object",
+    "SourceRow": "Int64",
+    "Column": "object",
+    "RawValue": "object",
+}
+
 SUMMARY_COLUMNS = {
     "Section": "object",
     "Item": "object",

@@ -12,10 +12,7 @@ import pandas as pd
 from openpyxl.utils.exceptions import InvalidFileException
 
 from dq.config import COLUMN_TYPES, INPUT_FILES, Config
-
-# docs/output_spec.md section 0
-PARSE_ISSUE_COLUMNS = {"File": "object", "SourceRow": "Int64", "Column": "object",
-                       "RawValue": "object"}
+from dq.schema import PARSE_ISSUE_COLUMNS, empty_frame
 
 Source = str | Path | IO[bytes]
 
@@ -89,7 +86,7 @@ def convert_file(raw: pd.DataFrame, file: str) -> tuple[pd.DataFrame, pd.DataFra
             "Column": column,
             "RawValue": raw.loc[failed, column].map(str),
         }))
-    return converted, pd.concat(issues) if issues else empty_parse_issues()
+    return converted, pd.concat(issues) if issues else empty_frame(PARSE_ISSUE_COLUMNS)
 
 
 def convert_column(raw: pd.Series, kind: str | None) -> tuple[pd.Series, pd.Series]:
@@ -134,10 +131,14 @@ ACCEPTS = {
 }
 
 
+def parse_issues_of(data: InputData, file: str, column: str) -> pd.DataFrame:
+    issues = data.parse_issues
+    return issues[(issues["File"] == file) & (issues["Column"] == column)]
+
+
 def truly_missing(data: InputData, file: str, column: str) -> pd.Series:
     frame = getattr(data, file)
-    issues = data.parse_issues
-    unparsed = issues.loc[(issues["File"] == file) & (issues["Column"] == column), "SourceRow"]
+    unparsed = parse_issues_of(data, file, column)["SourceRow"]
     return frame[column].isna() & ~frame["SourceRow"].isin(unparsed)
 
 
@@ -151,7 +152,7 @@ def empty_rows(data: InputData, file: str) -> pd.Series:
 
 def sort_parse_issues(issues: pd.DataFrame) -> pd.DataFrame:
     if issues.empty:
-        return empty_parse_issues()
+        return empty_frame(PARSE_ISSUE_COLUMNS)
     file_rank = issues["File"].map(INPUT_FILES.index)
     column_rank = [column_order(file, column) for file, column in zip(issues["File"],
                                                                          issues["Column"])]
@@ -164,11 +165,6 @@ def sort_parse_issues(issues: pd.DataFrame) -> pd.DataFrame:
 def column_order(file: str, column: str) -> int:
     known = list(COLUMN_TYPES[file])
     return known.index(column) if column in known else len(known)
-
-
-def empty_parse_issues() -> pd.DataFrame:
-    return pd.DataFrame({column: pd.Series(dtype=dtype)
-                         for column, dtype in PARSE_ISSUE_COLUMNS.items()})
 
 
 def header_name(value: Any, position: int) -> str:
