@@ -2,8 +2,8 @@ from __future__ import annotations
 
 import pandas as pd
 
-from dq.analytics import (duplicate_candidates, key_tuples, matches_a_position,
-                          matching_positions, valid_isin)
+from dq.analytics import (duplicate_candidates, matches_a_position, position_values,
+                          valid_isin)
 from dq.context import Context
 from dq.controls.common import evaluated_rows
 from dq.exceptions import make_duplicate_exceptions, make_exceptions
@@ -49,29 +49,20 @@ def check_past_forecast_cashflow(data: InputData, ctx: Context) -> pd.DataFrame:
 
 
 def check_currency_mismatch(data: InputData, ctx: Context) -> pd.DataFrame:
-    # Rule 6: only on cashflows that match a position. A currency outside the
-    # allowed list is reported by INVALID_VALUE only, so it is not compared.
-    key = ctx.config.keys["cashflow_to_position"]
-    allowed = set(ctx.config.allowed_values["Currency"])
+    # Rule 6: an unmatched cashflow has no position currency, so it is never
+    # compared. A currency outside the allowed list (on either side) is
+    # reported by INVALID_VALUE only.
+    allowed = ctx.config.allowed_values["Currency"]
     cashflows = data.cashflows
-    positions = matching_positions(data, ctx)
-    currencies_by_key: dict[tuple, set] = {}
-    for values, currency in zip(key_tuples(positions, key), positions["Currency"]):
-        if currency in allowed:
-            currencies_by_key.setdefault(values, set()).add(currency)
-    expected = [currencies_by_key.get(values, set()) for values in key_tuples(cashflows, key)]
-    different = pd.Series(
-        [currency in allowed and bool(currencies) and currency not in currencies
-         for currency, currencies in zip(cashflows["Currency"], expected)],
-        index=cashflows.index)
-    mismatch = matchable(data, ctx) & matches_a_position(data, ctx) & different
+    currency = cashflows["Currency"]
+    position_currency = position_values(data, cashflows, "Currency", ctx)
+    mismatch = (evaluated_rows(data, "cashflows", ctx) & currency.isin(allowed)
+                & position_currency.isin(allowed) & (currency != position_currency))
     rows = with_security_name(data, cashflows[mismatch], ctx)
-    comments = [f"Cashflow in {currency}, position in {', '.join(sorted(currencies))}."
-                for currency, currencies, flagged in zip(cashflows["Currency"], expected, mismatch)
-                if flagged]
     return make_exceptions(
         rows, "CURRENCY_MISMATCH", ctx, "cashflows", "Currency", observed=rows["Currency"],
-        comment=pd.Series(comments, index=rows.index, dtype=object),
+        comment="Cashflow in " + rows["Currency"] + ", position in "
+                + position_currency[mismatch] + ".",
     )
 
 
@@ -93,12 +84,7 @@ def allowed_portfolio(cashflows: pd.DataFrame, ctx: Context) -> pd.Series:
 def with_security_name(data: InputData, rows: pd.DataFrame, ctx: Context) -> pd.DataFrame:
     # Cashflows have no SecurityName: take it from the matching position,
     # empty when there is none (output_spec.md section 1).
-    key = ctx.config.keys["cashflow_to_position"]
-    names = (matching_positions(data, ctx)
-             .drop_duplicates(list(key))
-             .set_index(list(key))["SecurityName"])
-    looked_up = [names.get(values) for values in key_tuples(rows, key)]
-    return rows.assign(SecurityName=pd.Series(looked_up, index=rows.index, dtype=object))
+    return rows.assign(SecurityName=position_values(data, rows, "SecurityName", ctx))
 
 
 def key_text(rows: pd.DataFrame, key: tuple[str, ...]) -> pd.Series | None:

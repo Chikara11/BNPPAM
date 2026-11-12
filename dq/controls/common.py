@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import pandas as pd
 
-from dq.analytics import first_occurrence, held_isins, valid_isin
+from dq.analytics import first_occurrence, held_isins, position_values, valid_isin
 from dq.config import COLUMN_TYPES, INPUT_FILES
 from dq.context import Context
 from dq.exceptions import combine_exceptions, make_exceptions
@@ -155,19 +155,10 @@ def date_exceptions(data: InputData, ctx: Context) -> list[pd.DataFrame]:
 
 def cashflow_after_maturity_exceptions(data: InputData, ctx: Context) -> pd.DataFrame:
     # Only on cashflows that match a position (rule 9): an unmatched cashflow
-    # has no maturity to compare with.
-    key = ctx.config.keys["cashflow_to_position"]
-    positions = data.positions
-    usable = (evaluated_rows(data, "positions", ctx) & valid_isin(positions, ctx)
-              & positions[list(key)].notna().all(axis=1))
-    maturities = (positions[usable].drop_duplicates(list(key))
-                  .set_index(list(key))["MaturityDate"])
+    # has no maturity (NaT), so the comparison is False.
     cashflows = data.cashflows
-    maturity = pd.Series(
-        [maturities.get(tuple(values)) for values in cashflows[list(key)].itertuples(index=False)],
-        index=cashflows.index, dtype="datetime64[us]")
-    after = (evaluated_rows(data, "cashflows", ctx) & valid_isin(cashflows, ctx)
-             & (cashflows["CashflowDate"] > maturity))
+    maturity = position_values(data, cashflows, "MaturityDate", ctx)
+    after = evaluated_rows(data, "cashflows", ctx) & (cashflows["CashflowDate"] > maturity)
     rows = cashflows[after]
     comments = [f"CashflowDate is after the MaturityDate of its position ({date:%Y-%m-%d})."
                 for date in maturity[after]]

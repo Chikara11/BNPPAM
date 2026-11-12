@@ -47,16 +47,13 @@ def upcoming_cashflows(data: InputData, ctx: Context) -> pd.DataFrame:
     cashflows = data.cashflows
     in_window = in_horizon(data, ctx)
     rows = cashflows[in_window]
-    key = ctx.config.keys["cashflow_to_position"]
-    positions = matching_positions(data, ctx).drop_duplicates(list(key)).set_index(list(key))
-    keys = key_tuples(rows, key)
     upcoming = pd.DataFrame({
         "CashflowDate": rows["CashflowDate"],
         "DaysFromReference": (rows["CashflowDate"] - ctx.reference_date).dt.days,
         "Portfolio": rows["Portfolio"],
         "ISIN": rows["ISIN"],
-        "SecurityName": [positions["SecurityName"].get(values) for values in keys],
-        "AssetType": [positions["AssetType"].get(values) for values in keys],
+        "SecurityName": position_values(data, rows, "SecurityName", ctx),
+        "AssetType": position_values(data, rows, "AssetType", ctx),
         "CashflowType": rows["CashflowType"],
         "Amount": rows["Amount"],
         "Currency": rows["Currency"],
@@ -273,22 +270,33 @@ def in_horizon(data: InputData, ctx: Context) -> pd.Series:
 
 
 def matching_positions(data: InputData, ctx: Context) -> pd.DataFrame:
-    # Every position at the reference date with a complete key and a valid
-    # ISIN, duplicates included: matching is a membership test (rule 4).
-    key = ctx.config.keys["cashflow_to_position"]
+    # One position per Portfolio + ISIN that a cashflow can match: valid ISIN
+    # and complete key (rule 1), first occurrence of a duplicated position
+    # (rule 12; the duplicate control reports the other rows). Matching is a
+    # membership test, never a row join (rule 4).
+    key = list(ctx.config.keys["cashflow_to_position"])
     positions = data.positions
-    return positions[valid_isin(positions, ctx) & positions[list(key)].notna().all(axis=1)]
+    usable = (first_occurrence(data, "positions", ctx) & valid_isin(positions, ctx)
+              & positions[key].notna().all(axis=1))
+    return positions[usable].drop_duplicates(key)
 
 
 def matches_a_position(data: InputData, ctx: Context) -> pd.Series:
-    key = ctx.config.keys["cashflow_to_position"]
-    held = pd.MultiIndex.from_frame(matching_positions(data, ctx)[list(key)])
-    cashflow_keys = pd.MultiIndex.from_frame(data.cashflows[list(key)])
+    key = list(ctx.config.keys["cashflow_to_position"])
+    held = pd.MultiIndex.from_frame(matching_positions(data, ctx)[key])
+    cashflow_keys = pd.MultiIndex.from_frame(data.cashflows[key])
     return pd.Series(cashflow_keys.isin(held), index=data.cashflows.index)
 
 
-def key_tuples(frame: pd.DataFrame, key: tuple[str, ...]) -> list[tuple]:
-    return [tuple(values) for values in frame[list(key)].itertuples(index=False)]
+def position_values(data: InputData, rows: pd.DataFrame, column: str,
+                    ctx: Context) -> pd.Series:
+    # The value of `column` on the position each cashflow row matches,
+    # aligned on rows; empty (NaN / NaT) when the row matches no position.
+    key = list(ctx.config.keys["cashflow_to_position"])
+    lookup = matching_positions(data, ctx).set_index(key)[column]
+    # reindex rather than Series.map: map fails on an empty datetime lookup
+    found = lookup.reindex(pd.MultiIndex.from_frame(rows[key]))
+    return pd.Series(found.to_numpy(), index=rows.index, dtype=lookup.dtype)
 
 
 def not_applicable_cells(frame: pd.DataFrame, file: str, column: str,

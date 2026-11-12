@@ -251,6 +251,16 @@ def test_duplicated_position_does_not_duplicate_cashflow_checks():
     assert check(cashflow_controls.check_unmatched_cashflow, data).empty
 
 
+def test_cashflow_is_compared_with_the_first_occurrence_of_a_duplicated_position():
+    # Rule 12: the second row (USD) is reported by DUPLICATE_POSITION only,
+    # it does not make a USD cashflow match the EUR position.
+    data = make_data([position(), position(Currency="USD", MaturityDate="2026-12-01")],
+                     cashflows=[cashflow(Currency="USD", CashflowDate="2026-12-05")])
+    assert raised(data) == [
+        ("CURRENCY_MISMATCH", "cashflows", "Currency"),
+        ("DUPLICATE_POSITION", "positions", "ValuationDate+Portfolio+ISIN")]
+
+
 def test_duplicate_cashflow_fires_once_per_key():
     data = make_data(cashflows=[cashflow(), cashflow(), cashflow(Amount=75000.01)])
     exceptions = check(cashflow_controls.check_duplicate_cashflow, data)
