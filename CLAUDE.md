@@ -104,6 +104,9 @@ The anomaly manifest expects exactly one exception per injected anomaly.
 The engine follows these rules:
 1. A position without ISIN raises only MISSING_ISIN: no other ISIN-based
    control (price history, price movement, duplicate key) runs on that row.
+   Controls that do not depend on the ISIN still run on it: a missing ISIN
+   and, for example, a negative Nominal are two different problems and
+   raise two exceptions.
 2. Only ISIN, MarketPrice and Rating have a dedicated "missing" control
    (MISSING_ISIN, MISSING_MARKET_PRICE, MISSING_RATING). MISSING_VALUE
    covers every other required field, including Nominal, BookPrice and

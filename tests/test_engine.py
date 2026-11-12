@@ -123,10 +123,18 @@ def exceptions_frame(rows: list[dict]) -> pd.DataFrame:
     return conform(pd.DataFrame([{**filler, **row} for row in rows]), EXCEPTION_COLUMNS)
 
 
+@pytest.fixture(scope="module")
+def isin_only_config(test_config):
+    # Every other control disabled, so these engine tests only see MISSING_ISIN.
+    return with_overrides(test_config, {"controls": {
+        control_id: {"enabled": control_id == "MISSING_ISIN"}
+        for control_id in test_config.controls}})
+
+
 def test_real_config_needs_every_control_registered(real_config, data):
     # TEMPORARY: removed when the last control is registered.
     missing = [control for control in real_config.controls if control not in CONTROL_REGISTRY]
-    assert len(missing) == 13
+    assert len(missing) == len(real_config.controls) - len(CONTROL_REGISTRY) > 0
     with pytest.raises(RegistryError) as error:
         check_registry(real_config)
     assert all(control in str(error.value) for control in missing)
@@ -136,18 +144,26 @@ def test_real_config_needs_every_control_registered(real_config, data):
 
 def test_registered_control_missing_from_the_config_is_an_error(real_config):
     raw = thaw(real_config.raw)
-    raw["controls"] = {"DUPLICATE_POSITION": raw["controls"]["DUPLICATE_POSITION"]}
-    with pytest.raises(RegistryError, match="not registered: DUPLICATE_POSITION.*"
-                                            "not in config.yaml: MISSING_ISIN"):
+    settings = raw["controls"]["MISSING_ISIN"]
+    raw["controls"] = {"MISSING_ISIN": settings, "NOT_A_CONTROL": settings}
+    with pytest.raises(RegistryError, match="not registered: NOT_A_CONTROL.*"
+                                            "not in config.yaml: .*DUPLICATE_POSITION"):
         check_registry(config_from_dict(raw))
 
 
-def test_run_on_inputs(input_results):
-    exceptions = input_results.exceptions
+def test_run_on_inputs(data, isin_only_config):
+    results = run(data, isin_only_config)
+    exceptions = results.exceptions
     assert exceptions["ExceptionID"].tolist() == ["EXC-0001"]
     assert exceptions.loc[0, "ControlID"] == "MISSING_ISIN"
     assert exceptions.loc[0, "SourceRow"] == A01_SOURCE_ROW
-    assert input_results.reference_date == pd.Timestamp("2026-11-11")
+    assert results.reference_date == pd.Timestamp("2026-11-11")
+
+
+def test_exception_ids_are_sequential_on_inputs(input_results):
+    count = len(input_results.exceptions)
+    assert input_results.exceptions["ExceptionID"].tolist() == [
+        f"EXC-{number:04d}" for number in range(1, count + 1)]
 
 
 def test_outputs_have_the_documented_columns(input_results):
@@ -159,8 +175,8 @@ def test_outputs_have_the_documented_columns(input_results):
         assert getattr(input_results, output).dtypes.equals(empty_frame(columns).dtypes)
 
 
-def test_disabled_control_does_not_run(data, test_config):
-    config = with_overrides(test_config, {"controls": {"MISSING_ISIN": {"enabled": False}}})
+def test_disabled_control_does_not_run(data, isin_only_config):
+    config = with_overrides(isin_only_config, {"controls": {"MISSING_ISIN": {"enabled": False}}})
     exceptions = run(data, config).exceptions
     assert exceptions.empty
     assert exceptions.dtypes.equals(empty_exceptions().dtypes)
@@ -170,15 +186,15 @@ def test_same_inputs_give_the_same_exceptions(data, test_config, input_results):
     pd.testing.assert_frame_equal(run(data, test_config).exceptions, input_results.exceptions)
 
 
-def test_empty_row_does_not_raise_missing_isin(data, test_config):
-    # Rule 11: reported once by INVALID_VALUE (later), never by MISSING_ISIN.
+def test_empty_row_does_not_raise_missing_isin(data, isin_only_config):
+    # Rule 11: reported once by INVALID_VALUE, never by MISSING_ISIN.
     empty_row = pd.DataFrame({"SourceRow": pd.array([99], dtype="Int64")})
     positions = pd.concat([data.positions, empty_row], ignore_index=True)
-    exceptions = run(dataclasses.replace(data, positions=positions), test_config).exceptions
+    exceptions = run(dataclasses.replace(data, positions=positions), isin_only_config).exceptions
     assert exceptions["SourceRow"].tolist() == [A01_SOURCE_ROW]
 
 
-def test_unparseable_isin_does_not_raise_missing_isin(data, test_config):
+def test_unparseable_isin_does_not_raise_missing_isin(data, isin_only_config):
     # Rule 10: a non-text ISIN is a parse issue, reported only by INVALID_VALUE.
     positions = data.positions.copy()
     positions.loc[positions["SourceRow"] == 2, "ISIN"] = None
@@ -186,14 +202,15 @@ def test_unparseable_isin_does_not_raise_missing_isin(data, test_config):
                           "Column": ["ISIN"], "RawValue": ["123456789012"]})
     changed = dataclasses.replace(data, positions=positions,
                                   parse_issues=pd.concat([data.parse_issues, issue]))
-    assert run(changed, test_config).exceptions["SourceRow"].tolist() == [A01_SOURCE_ROW]
+    assert run(changed, isin_only_config).exceptions["SourceRow"].tolist() == [A01_SOURCE_ROW]
 
 
-def test_positions_outside_the_reference_date_are_not_controlled(data, test_config):
+def test_positions_outside_the_reference_date_are_not_controlled(data, isin_only_config):
     positions = data.positions.copy()
     positions.loc[positions["SourceRow"] == A01_SOURCE_ROW, "ValuationDate"] = pd.Timestamp(
         "2026-11-04")
-    assert run(dataclasses.replace(data, positions=positions), test_config).exceptions.empty
+    changed = dataclasses.replace(data, positions=positions)
+    assert run(changed, isin_only_config).exceptions.empty
 
 
 def test_exceptions_are_sorted_by_severity_then_keys():
