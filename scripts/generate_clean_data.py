@@ -648,12 +648,21 @@ def save_workbook(data: pd.DataFrame, path: Path, name: str) -> None:
                 cell.number_format = "YYYY-MM-DD"
 
 
-def read_workbook(path: Path, name: str) -> pd.DataFrame:
-    """Read back with the conventions of data_spec.md (numbers as float64)."""
-    numbers = {column: "float64" for column, kind in COLUMN_TYPES[name].items()
-               if kind == "number"}
+def read_workbook(path: Path, name: str, lenient_numbers: bool = False) -> pd.DataFrame:
+    """Read back with the conventions of data_spec.md (numbers as float64).
+
+    lenient_numbers (large sample only): a number column may hold an injected
+    text cell such as "5,000,000"; it is kept as text, the numbers as float.
+    """
+    numbers = [column for column, kind in COLUMN_TYPES[name].items() if kind == "number"]
     texts = {column: "object" for column, kind in COLUMN_TYPES[name].items() if kind == "text"}
-    return pd.read_excel(path, dtype={**numbers, **texts})
+    if not lenient_numbers:
+        return pd.read_excel(path, dtype={**{column: "float64" for column in numbers}, **texts})
+    data = pd.read_excel(path, dtype={**{column: object for column in numbers}, **texts})
+    for column in numbers:
+        data[column] = data[column].map(
+            lambda value: value if isinstance(value, str) else float(value))
+    return data
 
 
 def fingerprint(files: dict) -> str:
