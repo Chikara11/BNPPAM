@@ -72,7 +72,8 @@ securitised-credit-dq/
 │   ├── test_manifest.py
 │   ├── test_controls.py
 │   ├── test_analytics.py
-│   └── test_boundaries.py
+│   ├── test_boundaries.py
+│   └── test_report.py
 ├── data/clean/   data/inputs/
 ├── output/                   # generated reports (git-ignored)
 └── docs/                     # architecture.md, data_spec.md, output_spec.md,
@@ -313,15 +314,31 @@ the price change formula and its rounding are those of `CLAUDE.md`.
   `price_movements`, `upcoming_cashflows`, `data_quality`, `summary`.
 
 ### 4.8 `report.py`
-- `write_report(results: Results, path_or_buffer) -> None`
+- `write_report(results: Results, path_or_buffer, *, generated_at=None) -> None`
+  `generated_at` is the run timestamp shown on the Executive Summary
+  (default: now, to the second); tests pass a fixed value so the file is
+  deterministic.
 - Sheets: Executive Summary, Exceptions, Price Movements, Cashflows {N}D
   (N = `cashflow_horizon_days` of the config used, e.g. "Cashflows 30D"),
-  Data Quality, Parameters (the config used, for audit).
-- The Executive Summary shows "Position rows not at the reference date:
-  N (ignored)" from `Results.summary`.
-- Formatting only (headers, number formats, column widths, severity colours,
-  frozen header, filters). No calculation.
+  Data Quality, Parameters (the config used, for audit: one row per
+  setting, dotted path and YAML spelling, e.g. `controls.MISSING_ISIN.enabled`
+  = `true`).
+- The Executive Summary shows the reference date, the run timestamp, then
+  `Results.summary` section by section, including "Position rows not at the
+  reference date (ignored)".
+- Formatting only (headers, number formats, column widths, severity tint on
+  the Severity cell, breach rows highlighted, frozen header, filters). No
+  calculation. Sheet names, number formats and colours are presentation
+  constants defined once in `report.py` (output_spec.md section 6).
+- Every text cell is stored as plain text, never as a formula: a value such
+  as `=1+1` coming from the data cannot run in Excel.
 - Works with a file path (CLI) or a `BytesIO` (Streamlit download).
+- `scripts/run_report.py` (`python -m scripts.run_report`, options
+  `--inputs`, `--output`, `--config`): load -> run -> write, then prints the
+  reference date, the exceptions by severity (from `Results.summary`) and
+  the report path. A `ConfigError`, `InputSchemaError`, `RegistryError` or
+  an unwritable output prints a readable message and exits with code 1,
+  never a traceback.
 
 ### 4.9 `app.py`
 - Upload the 3 files or use the bundled `data/inputs/` sample.
@@ -383,6 +400,10 @@ Changing a threshold or a severity = edit `config.yaml` only.
 - `test_controls.py`: one small hand-built DataFrame per case.
 - `test_boundaries.py`: thresholds at the limit, config overrides, disabled
   controls.
+- `test_report.py`: the Excel report read back with openpyxl (sheets,
+  headers, rows, number formats, colours, plain text against formula
+  injection, Executive Summary, Parameters) and the `run_report` CLI
+  (a real `python -m` run, readable errors with exit code 1).
 - Tests never write files outside a temporary directory.
 
 ---

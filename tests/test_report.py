@@ -1,8 +1,12 @@
 import dataclasses
 import datetime
 import io
+import shutil
+import subprocess
+import sys
 
 import openpyxl
+import pandas as pd
 import pytest
 
 from dq.config import with_overrides
@@ -10,7 +14,10 @@ from dq.engine import run
 from dq.report import write_report
 from dq.schema import (DATA_QUALITY_COLUMNS, EXCEPTION_COLUMNS, PRICE_MOVEMENT_COLUMNS,
                        UPCOMING_CASHFLOW_COLUMNS)
-from helpers import CONFIG
+from helpers import CONFIG, CONFIG_PATH, REPO_ROOT
+
+INPUTS = str(REPO_ROOT / "data" / "inputs")
+from scripts import run_report
 
 GENERATED_AT = datetime.datetime(2026, 11, 12, 9, 30, 0)
 SHEETS = ["Executive Summary", "Exceptions", "Price Movements", "Cashflows 30D",
@@ -170,3 +177,46 @@ def test_report_is_written_to_a_file_path(input_results, tmp_path):
     path = tmp_path / "report.xlsx"
     write_report(input_results, path, generated_at=GENERATED_AT)
     assert openpyxl.load_workbook(path).sheetnames == SHEETS
+
+
+def test_run_report_module_writes_the_report_and_prints_the_run(tmp_path):
+    output = tmp_path / "out" / "report.xlsx"
+    finished = subprocess.run(
+        [sys.executable, "-m", "scripts.run_report", "--inputs", "data/inputs",
+         "--output", str(output)], cwd=REPO_ROOT, capture_output=True, text=True)
+    assert finished.returncode == 0, finished.stderr
+    assert "Exceptions: 15 (Critical 6, Warning 7, Information 2)" in finished.stdout
+    assert openpyxl.load_workbook(output).sheetnames == SHEETS
+
+
+def without_column(tmp_path, column: str):
+    # A copy of data/inputs whose positions file lacks one column.
+    for file in ("previous_prices", "cashflows"):
+        shutil.copy(REPO_ROOT / "data" / "inputs" / f"{file}.xlsx", tmp_path)
+    positions = pd.read_excel(REPO_ROOT / "data" / "inputs" / "positions.xlsx")
+    positions.drop(columns=column).to_excel(tmp_path / "positions.xlsx", index=False)
+    return tmp_path
+
+
+@pytest.mark.parametrize("arguments, message", [
+    (lambda tmp: ["--inputs", str(without_column(tmp, "Rating"))],
+     "positions file is missing required column(s): Rating"),
+    (lambda tmp: ["--inputs", str(tmp / "nowhere")], "The positions file"),
+    (lambda tmp: ["--inputs", INPUTS, "--config", str(tmp / "missing.yaml")],
+     "Cannot read the config file"),
+])
+def test_run_report_bad_input_exits_1_with_a_readable_message(tmp_path, capsys, arguments,
+                                                              message):
+    defaults = ["--config", str(CONFIG_PATH), "--output", str(tmp_path / "r.xlsx")]
+    code = run_report.main(defaults + arguments(tmp_path))  # argparse: the last value wins
+    error = capsys.readouterr().err
+    assert code == 1
+    assert message in error and "Traceback" not in error
+    assert not (tmp_path / "r.xlsx").exists()
+
+
+def test_run_report_unwritable_output_exits_1(tmp_path, capsys):
+    (tmp_path / "report.xlsx").mkdir()  # a folder where the file should go
+    assert run_report.main(["--inputs", INPUTS, "--config", str(CONFIG_PATH),
+                            "--output", str(tmp_path / "report.xlsx")]) == 1
+    assert "cannot write the report" in capsys.readouterr().err
