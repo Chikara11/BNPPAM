@@ -1,0 +1,102 @@
+# =============================================================================
+# config.yaml – business rules of the CLO / ABS monitoring prototype
+# Every threshold, severity and key used by the controls is defined here.
+# The code never hardcodes them.
+# =============================================================================
+
+# Reference date of the controls ("as of" date).
+# null = latest ValuationDate found in positions.xlsx.
+reference_date: null
+
+# Upcoming cashflows: from the reference date to reference date + N days (inclusive).
+cashflow_horizon_days: 30
+
+# Price movement thresholds, in % of the previous price (absolute movement).
+# An alert is raised when |PriceChangePct| is STRICTLY GREATER than the threshold.
+price_move_thresholds_pct:
+  CLO Debt: 5.0
+  ABS: 5.0
+  CLO Equity: 15.0
+
+# Asset types for which a missing rating is an exception.
+# CLO Equity is excluded: equity tranches are not rated.
+rating_required_for: [CLO Debt, ABS]
+
+# Allowed values for categorical columns.
+allowed_values:
+  AssetType: [CLO Debt, CLO Equity, ABS]
+  Currency: [EUR, USD, GBP]
+  CashflowType: [Coupon, Principal, Fee]
+  Status: [Forecast, Confirmed, Paid]
+
+# Required columns per input file. Missing columns stop processing.
+required_columns:
+  positions: [ValuationDate, Portfolio, ISIN, SecurityName, AssetType, Currency,
+              Nominal, BookPrice, MarketPrice, Rating, MaturityDate]
+  previous_prices: [ISIN, PreviousDate, PreviousPrice, PriceSource]
+  cashflows: [Portfolio, ISIN, CashflowDate, CashflowType, Currency, Amount, Status]
+
+# Keys
+keys:
+  position_unique: [ValuationDate, Portfolio, ISIN]
+  cashflow_unique: [Portfolio, ISIN, CashflowDate, CashflowType, Amount]
+  cashflow_to_position: [Portfolio, ISIN]
+
+# Controls: on/off switch, severity (Critical | Warning | Information), label.
+controls:
+  MISSING_ISIN:
+    enabled: true
+    severity: Critical
+    label: Missing ISIN
+  DUPLICATE_POSITION:
+    enabled: true
+    severity: Critical
+    label: Duplicate position
+  MISSING_MARKET_PRICE:
+    enabled: true
+    severity: Critical
+    label: Missing market price
+  INVALID_NOMINAL:
+    enabled: true
+    severity: Critical
+    label: Zero or negative nominal
+  INVALID_PRICE:
+    enabled: true
+    severity: Critical
+    label: Zero or negative price
+  MISSING_RATING:
+    enabled: true
+    severity: Warning
+    label: Missing rating
+  PRICE_MOVE_ABOVE_THRESHOLD:
+    enabled: true
+    severity: Warning
+    label: Price movement above threshold
+  NO_PRICE_HISTORY:
+    enabled: true
+    severity: Information
+    label: New security without price history
+  UNMATCHED_CASHFLOW:
+    enabled: true
+    severity: Warning
+    label: Cashflow without matching position
+  DUPLICATE_CASHFLOW:
+    enabled: true
+    severity: Warning
+    label: Duplicate cashflow
+  PAST_FORECAST_CASHFLOW:
+    enabled: true
+    severity: Warning
+    label: Past-dated cashflow still Forecast
+  CURRENCY_MISMATCH:
+    enabled: true
+    severity: Information
+    label: Cashflow currency differs from position currency
+  INVALID_VALUE:
+    enabled: true
+    severity: Warning
+    label: Value outside allowed list
+  MISSING_VALUE:
+    enabled: true
+    severity: Warning
+    label: Other required value missing
