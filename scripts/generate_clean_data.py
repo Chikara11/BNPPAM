@@ -472,7 +472,9 @@ def check_allowed_values_and_portfolio_layout(files: dict, config: dict) -> None
     for name, data in files.items():
         for column, values in allowed.items():
             if column in data.columns:
-                fail_if_any(data[~data[column].isin(values)], 4,
+                # Empty cells are checked by invariants 3 and 5, not here.
+                present = ~is_missing(data[column])
+                fail_if_any(data[present & ~data[column].isin(values)], 4,
                             f"{name}.{column} outside {values}")
         bad_isin = ~data["ISIN"].map(lambda isin: bool(ISIN_PATTERN.match(str(isin))))
         fail_if_any(data[bad_isin], 4, f"{name}.ISIN does not match {ISIN_PATTERN.pattern}")
