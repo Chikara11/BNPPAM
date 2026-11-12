@@ -2,8 +2,9 @@ from __future__ import annotations
 
 import pandas as pd
 
+from dq.analytics import duplicate_candidates
 from dq.context import Context
-from dq.controls.common import duplicate_candidates, evaluated_rows
+from dq.controls.common import evaluated_rows
 from dq.exceptions import make_duplicate_exceptions, make_exceptions
 from dq.loaders import InputData, truly_missing
 

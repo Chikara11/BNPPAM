@@ -233,9 +233,12 @@ Rules for a control:
 
 Placement:
 - `controls/common.py`: MISSING_VALUE, INVALID_VALUE, INVALID_PRICE, and the
-  row-scope helpers every control uses: `valid_isin` (rule 1),
-  `duplicate_candidates` / `first_occurrence` (rule 12) and `evaluated_rows`
-  (rules 1, 11, 12; for previous prices, securities held only);
+  `evaluated_rows` (rules 1, 11, 12; for previous prices, securities held
+  only), the row scope of every non-duplicate control. The lower-level row
+  helpers live in `analytics.py`, which controls and analytics both use
+  (analytics never imports the controls): `valid_isin` (rule 1),
+  `duplicate_candidates` / `first_occurrence` (rule 12), `held_isins` and
+  the cashflow-to-position matching;
 - `controls/cashflows.py`: UNMATCHED_CASHFLOW, CURRENCY_MISMATCH and the
   other cashflow controls (DUPLICATE_CASHFLOW, PAST_FORECAST_CASHFLOW);
 - `controls/prices.py`: price controls (PRICE_MOVE_ABOVE_THRESHOLD,

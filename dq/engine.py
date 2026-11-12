@@ -4,13 +4,12 @@ from dataclasses import dataclass
 
 import pandas as pd
 
+from dq import analytics
 from dq.config import Config
 from dq.context import Context, build_context, positions_at_reference_date
 from dq.controls import CONTROL_REGISTRY
 from dq.exceptions import combine_exceptions
 from dq.loaders import InputData
-from dq.schema import (DATA_QUALITY_COLUMNS, PRICE_MOVEMENT_COLUMNS, SUMMARY_COLUMNS,
-                       UPCOMING_CASHFLOW_COLUMNS, empty_frame)
 
 SORT_COLUMNS = ["Severity", "ControlID", "Portfolio", "ISIN", "SourceRow", "Field"]
 
@@ -35,15 +34,15 @@ def run(data: InputData, config: Config) -> Results:
     ctx = build_context(data, config)
     data = positions_at_reference_date(data, ctx)
     exceptions = assign_exception_ids(sort_exceptions(run_controls(data, ctx)))
-    # Analytics come in a later iteration; until then they are typed empty tables.
+    # Analytics run on the same filtered positions as the controls.
     return Results(
         reference_date=ctx.reference_date,
         config=config,
         exceptions=exceptions,
-        price_movements=empty_frame(PRICE_MOVEMENT_COLUMNS),
-        upcoming_cashflows=empty_frame(UPCOMING_CASHFLOW_COLUMNS),
-        data_quality=empty_frame(DATA_QUALITY_COLUMNS),
-        summary=empty_frame(SUMMARY_COLUMNS),
+        price_movements=analytics.price_movements(data, ctx),
+        upcoming_cashflows=analytics.upcoming_cashflows(data, ctx),
+        data_quality=analytics.data_quality(data, ctx),
+        summary=analytics.summary(exceptions, data, ctx),
     )
 
 

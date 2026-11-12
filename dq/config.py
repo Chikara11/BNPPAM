@@ -38,7 +38,8 @@ COLUMN_TYPES = {
 
 TOP_LEVEL_KEYS = (
     "reference_date", "cashflow_horizon_days", "isin_pattern", "price_move_thresholds_pct",
-    "rating_required_for", "allowed_values", "required_columns", "keys", "controls",
+    "rating_required_for", "amount_sign", "allowed_values", "required_columns", "keys",
+    "controls",
 )
 
 # Each key of config.yaml "keys" and the input file(s) whose columns it uses.
@@ -68,6 +69,7 @@ class Config:
     isin_pattern: str
     price_move_thresholds_pct: Mapping[str, float]
     rating_required_for: tuple[str, ...]
+    amount_sign: Mapping[str, str]  # CashflowType -> "positive" or "negative"
     allowed_values: Mapping[str, tuple[str, ...]]
     required_columns: Mapping[str, tuple[str, ...]]
     keys: Mapping[str, tuple[str, ...]]
@@ -99,6 +101,7 @@ def config_from_dict(raw: dict) -> Config:
             {asset_type: float(value)
              for asset_type, value in raw["price_move_thresholds_pct"].items()}),
         rating_required_for=tuple(raw["rating_required_for"]),
+        amount_sign=MappingProxyType(dict(raw["amount_sign"])),
         allowed_values=freeze_lists(raw["allowed_values"]),
         required_columns=freeze_lists(raw["required_columns"]),
         keys=freeze_lists(raw["keys"]),
@@ -128,6 +131,7 @@ def validate_config(raw: dict) -> None:
         + check_allowed_values(raw)
         + check_thresholds(raw)
         + check_rating_required_for(raw)
+        + check_amount_sign(raw)
         + check_required_columns(raw)
         + check_keys(raw)
         + check_controls(raw)
@@ -196,6 +200,20 @@ def check_rating_required_for(raw: dict) -> list[str]:
     asset_types = allowed_asset_types(raw)
     return [f"rating_required_for: {value} is not an allowed AssetType."
             for value in values if asset_types and value not in asset_types]
+
+
+def check_amount_sign(raw: dict) -> list[str]:
+    signs = raw["amount_sign"]
+    if not isinstance(signs, Mapping) or not signs:
+        return ["amount_sign must be a mapping of CashflowType -> positive or negative."]
+    allowed = raw["allowed_values"]
+    types = allowed.get("CashflowType") if isinstance(allowed, Mapping) else None
+    problems = [f"amount_sign.{cashflow_type} must be positive or negative (got {sign!r})."
+                for cashflow_type, sign in signs.items() if sign not in ("positive", "negative")]
+    if is_text_list(types):
+        problems += [f"amount_sign: {cashflow_type} is not an allowed CashflowType."
+                     for cashflow_type in signs if cashflow_type not in types]
+    return problems
 
 
 def check_required_columns(raw: dict) -> list[str]:

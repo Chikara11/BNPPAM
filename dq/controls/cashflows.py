@@ -2,8 +2,10 @@ from __future__ import annotations
 
 import pandas as pd
 
+from dq.analytics import (duplicate_candidates, key_tuples, matches_a_position,
+                          matching_positions, valid_isin)
 from dq.context import Context
-from dq.controls.common import duplicate_candidates, evaluated_rows, valid_isin
+from dq.controls.common import evaluated_rows
 from dq.exceptions import make_duplicate_exceptions, make_exceptions
 from dq.loaders import InputData
 
@@ -88,21 +90,6 @@ def allowed_portfolio(cashflows: pd.DataFrame, ctx: Context) -> pd.Series:
     return cashflows["Portfolio"].isin(allowed)
 
 
-def matching_positions(data: InputData, ctx: Context) -> pd.DataFrame:
-    # Every position at the reference date with a complete key and a valid
-    # ISIN, duplicates included: matching is a membership test (rule 4).
-    key = ctx.config.keys["cashflow_to_position"]
-    positions = data.positions
-    return positions[valid_isin(positions, ctx) & positions[list(key)].notna().all(axis=1)]
-
-
-def matches_a_position(data: InputData, ctx: Context) -> pd.Series:
-    key = ctx.config.keys["cashflow_to_position"]
-    held = pd.MultiIndex.from_frame(matching_positions(data, ctx)[list(key)])
-    cashflow_keys = pd.MultiIndex.from_frame(data.cashflows[list(key)])
-    return pd.Series(cashflow_keys.isin(held), index=data.cashflows.index)
-
-
 def with_security_name(data: InputData, rows: pd.DataFrame, ctx: Context) -> pd.DataFrame:
     # Cashflows have no SecurityName: take it from the matching position,
     # empty when there is none (output_spec.md section 1).
@@ -112,10 +99,6 @@ def with_security_name(data: InputData, rows: pd.DataFrame, ctx: Context) -> pd.
              .set_index(list(key))["SecurityName"])
     looked_up = [names.get(values) for values in key_tuples(rows, key)]
     return rows.assign(SecurityName=pd.Series(looked_up, index=rows.index, dtype=object))
-
-
-def key_tuples(frame: pd.DataFrame, key: tuple[str, ...]) -> list[tuple]:
-    return [tuple(values) for values in frame[list(key)].itertuples(index=False)]
 
 
 def key_text(rows: pd.DataFrame, key: tuple[str, ...]) -> pd.Series | None:

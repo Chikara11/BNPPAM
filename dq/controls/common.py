@@ -1,9 +1,8 @@
 from __future__ import annotations
 
-import re
-
 import pandas as pd
 
+from dq.analytics import first_occurrence, held_isins, valid_isin
 from dq.config import COLUMN_TYPES, INPUT_FILES
 from dq.context import Context
 from dq.exceptions import combine_exceptions, make_exceptions
@@ -12,43 +11,9 @@ from dq.loaders import InputData, empty_rows, truly_missing
 # Rule 2: these columns have their own "missing" control, not MISSING_VALUE.
 DEDICATED_MISSING_CONTROLS = {"positions": ("ISIN", "MarketPrice", "Rating")}
 
-DUPLICATE_KEYS = {"positions": "position_unique", "previous_prices": "previous_price_unique",
-                  "cashflows": "cashflow_unique"}
-
 KIND_NAMES = {"text": "a text", "number": "a number", "date": "a date"}
 
 PRICE_FIELDS = {"positions": ("MarketPrice", "BookPrice"), "previous_prices": ("PreviousPrice",)}
-
-
-def valid_isin(frame: pd.DataFrame, ctx: Context) -> pd.Series:
-    pattern = re.compile(ctx.config.isin_pattern)
-    return frame["ISIN"].map(
-        lambda value: isinstance(value, str) and pattern.fullmatch(value) is not None
-    ).astype(bool)
-
-
-def held_isins(data: InputData, ctx: Context) -> pd.Series:
-    positions = data.positions
-    return positions.loc[valid_isin(positions, ctx), "ISIN"]
-
-
-def duplicate_candidates(data: InputData, file: str, ctx: Context) -> pd.Series:
-    # Rows the duplicate control compares: complete key and a usable ISIN
-    # (rule 1). Rule 12 hides the repeats of these rows from other controls.
-    frame = getattr(data, file)
-    key = ctx.config.keys[DUPLICATE_KEYS[file]]
-    complete = frame[list(key)].notna().all(axis=1)
-    if file == "previous_prices":
-        return complete & frame["ISIN"].isin(held_isins(data, ctx))
-    return complete & valid_isin(frame, ctx)
-
-
-def first_occurrence(data: InputData, file: str, ctx: Context) -> pd.Series:
-    frame = getattr(data, file)
-    key = ctx.config.keys[DUPLICATE_KEYS[file]]
-    candidates = duplicate_candidates(data, file, ctx)
-    repeated = frame[candidates].duplicated(list(key), keep="first")
-    return ~repeated.reindex(frame.index, fill_value=False)
 
 
 def evaluated_rows(data: InputData, file: str, ctx: Context) -> pd.Series:
@@ -91,6 +56,7 @@ def check_invalid_value(data: InputData, ctx: Context) -> pd.DataFrame:
         + isin_format_exceptions(data, ctx)
         + allowed_value_exceptions(data, ctx)
         + date_exceptions(data, ctx)
+        + amount_sign_exceptions(data, ctx)
     )
 
 
@@ -208,3 +174,20 @@ def cashflow_after_maturity_exceptions(data: InputData, ctx: Context) -> pd.Data
     return make_exceptions(rows, "INVALID_VALUE", ctx, "cashflows", "CashflowDate",
                            observed=rows["CashflowDate"],
                            comment=pd.Series(comments, index=rows.index, dtype=object))
+
+
+def amount_sign_exceptions(data: InputData, ctx: Context) -> list[pd.DataFrame]:
+    # data_spec.md section 3: Coupon and Principal are inflows, Fee an outflow.
+    # An empty Amount is MISSING_VALUE; an unknown CashflowType has no sign rule.
+    cashflows = data.cashflows
+    sign = cashflows["CashflowType"].map(dict(ctx.config.amount_sign))
+    amount = cashflows["Amount"]
+    wrong = (evaluated_rows(data, "cashflows", ctx) & amount.notna()
+             & (((sign == "positive") & (amount <= 0)) | ((sign == "negative") & (amount >= 0))))
+    rows = cashflows[wrong]
+    comments = [f"A {cashflow_type} amount must be "
+                f"{'greater' if expected == 'positive' else 'less'} than 0."
+                for cashflow_type, expected in zip(rows["CashflowType"], sign[wrong])]
+    return [make_exceptions(rows, "INVALID_VALUE", ctx, "cashflows", "Amount",
+                            observed=rows["Amount"],
+                            comment=pd.Series(comments, index=rows.index, dtype=object))]

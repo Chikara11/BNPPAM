@@ -88,11 +88,15 @@ cannot be computed.
 | 15 | MarketValue | float64 | yes | `Nominal * MarketPrice / 100`, in the position currency |
 | 16 | SourceRow | Int64 | no | Row in positions |
 
-**[Decision]** `MoveStatus` vocabulary (exactly one per row):
-`Computed`, `Missing ISIN`, `No price history`, `Missing market price`,
-`Invalid market price`, `Invalid previous price`, `Conflicting previous prices`
-(several different prices on the latest PreviousDate), `No usable previous price`
-(rows exist but none has a valid PreviousDate before the reference date).
+**[Decision]** `MoveStatus` vocabulary (exactly one per row; when several
+apply, the first in this list wins):
+`Missing ISIN` (empty), `Invalid ISIN` (present but not matching
+`isin_pattern`), `Missing market price`, `Invalid market price` (<= 0),
+`No price history` (no previous_prices row for the ISIN), `No usable previous
+price` (rows exist but none has a valid PreviousDate before the reference
+date), `Conflicting previous prices` (several different prices on the latest
+PreviousDate), `Missing previous price` (empty on the latest PreviousDate),
+`Invalid previous price` (<= 0 on the latest PreviousDate), `Computed`.
 
 Sort order: Breach (True first), abs(PriceChangePct) descending, Portfolio, ISIN.
 
@@ -135,7 +139,7 @@ One row per input file and column.
 | 5 | NotApplicable | Int64 | no | e.g. Rating on CLO Equity |
 | 6 | Missing | Int64 | no | Empty cells among applicable rows |
 | 7 | ParseIssues | Int64 | no | Non-empty values that failed type conversion |
-| 8 | CompletenessPct | float64 | yes | `(Applicable - Missing) / Applicable * 100`, rounded to 2 decimals; empty if no applicable row |
+| 8 | CompletenessPct | float64 | yes | `(Applicable - Missing - ParseIssues) / Applicable * 100`, rounded to 2 decimals; empty if no applicable row. A cell that cannot be read is not complete |
 
 Sort order: Source in the order above, then column order of data_spec.md.
 
@@ -155,8 +159,12 @@ currencies are never mixed.
 | 5 | Unit | object | no | `count`, `amount` or `pct` |
 
 Sections, in this order:
-1. `Overview`: positions at the reference date, portfolios, distinct ISINs,
-   position rows ignored (not at the reference date), cashflows in the horizon.
+1. `Overview`, in this order: `Positions` (at the reference date),
+   `Portfolios`, `Distinct ISINs`, `Duplicated position rows (counted twice in
+   totals)` (extra rows of a duplicated key, never removed), `Position rows not
+   at the reference date (ignored)`, `Cashflows in the horizon`, `Duplicated
+   cashflow rows in the horizon` (extra rows of a duplicated cashflow key among
+   the upcoming cashflows; they are in the totals).
 2. `Exceptions by severity`: Critical, Warning, Information (zeros included).
 3. `Exceptions by control`: every enabled control (zeros included).
 4. `Exceptions by portfolio`: every portfolio, plus `(none)` for exceptions

@@ -94,6 +94,8 @@ Detect:
 - Past-dated cashflows still marked Forecast.
 - Cashflow currency different from its position currency.
 - Values outside the allowed lists of config.yaml.
+- Cashflow amount with the wrong sign: Coupon and Principal > 0, Fee < 0
+  (`amount_sign` in config.yaml, data_spec.md section 3), INVALID_VALUE.
 - ISIN not matching `isin_pattern` of config.yaml (`^SYN\d{9}$`, data_spec.md).
 - Invalid dates: MaturityDate on or before the reference date, cashflow
   dated after the MaturityDate of its position, PreviousDate on or after

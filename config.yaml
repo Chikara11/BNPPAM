@@ -23,6 +23,13 @@ price_move_thresholds_pct:
   ABS: 5.0
   CLO Equity: 15.0
 
+# Sign of Amount per CashflowType (docs/data_spec.md): Coupon and Principal are
+# inflows (> 0), Fee is an outflow (< 0). A wrong sign is INVALID_VALUE.
+amount_sign:
+  Coupon: positive
+  Principal: positive
+  Fee: negative
+
 # Asset types for which a missing rating is an exception.
 # CLO Equity is excluded: equity tranches are not rated.
 rating_required_for: [CLO Debt, ABS]

@@ -2,9 +2,9 @@ from __future__ import annotations
 
 import pandas as pd
 
-from dq.analytics import USABLE, previous_price_by_position, price_change_pct
+from dq.analytics import duplicate_candidates, price_move_table, valid_isin
 from dq.context import Context
-from dq.controls.common import duplicate_candidates, evaluated_rows, valid_isin
+from dq.controls.common import evaluated_rows
 from dq.exceptions import make_duplicate_exceptions, make_exceptions
 from dq.loaders import InputData
 
@@ -24,29 +24,21 @@ def check_no_price_history(data: InputData, ctx: Context) -> pd.DataFrame:
 
 
 def check_price_move_above_threshold(data: InputData, ctx: Context) -> pd.DataFrame:
-    positions = data.positions
-    previous = previous_price_by_position(data, ctx)
-    market_price = positions["MarketPrice"]
-    previous_price = previous["PreviousPrice"]
-    threshold = positions["AssetType"].map(ctx.config.price_move_thresholds_pct)
-    # Rule 7: no movement when a price is missing or <= 0, or when the
-    # previous price is unusable; no threshold for an unknown AssetType.
-    computable = (evaluated_rows(data, "positions", ctx) & valid_isin(positions, ctx)
-                  & (previous["PreviousPriceStatus"] == USABLE)
-                  & (market_price > 0) & (previous_price > 0) & threshold.notna())
-    change = price_change_pct(market_price, previous_price)
-    alert = computable & (change.abs() > threshold)
-    rows = positions[alert]
+    # Rule 7 lives in analytics.price_move_table, shared with price_movements:
+    # a Breach exists only when the movement was computed.
+    moves = price_move_table(data, ctx)
+    alert = evaluated_rows(data, "positions", ctx) & moves["Breach"].fillna(False).astype(bool)
+    rows, move = data.positions[alert], moves[alert]
     comments = [
         f"Price moved from {before:.2f} on {date:%Y-%m-%d} to {after:.2f}: {pct:+.2f} %, "
         f"above the {limit:g} % threshold for {asset_type}."
         for before, date, after, pct, limit, asset_type in zip(
-            previous_price[alert], previous.loc[alert, "PreviousDate"], market_price[alert],
-            change[alert], threshold[alert], rows["AssetType"])
+            move["PreviousPrice"], move["PreviousDate"], move["MarketPrice"],
+            move["PriceChangePct"], move["ThresholdPct"], move["AssetType"])
     ]
     return make_exceptions(
         rows, "PRICE_MOVE_ABOVE_THRESHOLD", ctx, "positions", "MarketPrice",
-        observed=change[alert], comment=pd.Series(comments, index=rows.index, dtype=object),
+        observed=move["PriceChangePct"], comment=pd.Series(comments, index=rows.index, dtype=object),
     )
 
 

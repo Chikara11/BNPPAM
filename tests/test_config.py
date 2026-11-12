@@ -133,6 +133,14 @@ def break_missing_required_file(raw):
     del raw["required_columns"]["cashflows"]
 
 
+def break_amount_sign_value(raw):
+    raw["amount_sign"]["Fee"] = "minus"
+
+
+def break_amount_sign_type(raw):
+    raw["amount_sign"]["Dividend"] = "positive"
+
+
 def break_isin_pattern(raw):
     raw["isin_pattern"] = "^SYN[0-9"
 
@@ -156,6 +164,8 @@ def break_required_column_without_type(raw):
     (break_missing_required_file, "required_columns.cashflows"),
     (break_required_column_without_type, "Seniority has no type"),
     (break_isin_pattern, "isin_pattern"),
+    (break_amount_sign_value, "amount_sign.Fee"),
+    (break_amount_sign_type, "Dividend is not an allowed CashflowType"),
 ])
 def test_invalid_config_raises_a_clear_error(raw, breaker, named):
     breaker(raw)

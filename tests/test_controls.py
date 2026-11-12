@@ -473,3 +473,28 @@ def test_repeated_rows_with_a_bad_isin_are_each_evaluated():
     bad = position(ISIN="SYN1")
     data = make_data([bad, bad], previous_prices=[], cashflows=[])
     assert raised(data) == [("INVALID_VALUE", "positions", "ISIN")] * 2
+
+
+@pytest.mark.parametrize("cashflow_type, amount, comment", [
+    ("Fee", 4500.0, "A Fee amount must be less than 0."),
+    ("Fee", 0.0, "A Fee amount must be less than 0."),
+    ("Coupon", -75000.0, "A Coupon amount must be greater than 0."),
+    ("Principal", 0.0, "A Principal amount must be greater than 0."),
+])
+def test_amount_with_the_wrong_sign_is_invalid_value_only(cashflow_type, amount, comment):
+    data = make_data(cashflows=[cashflow(CashflowType=cashflow_type, Amount=amount)])
+    exceptions = check(common_controls.check_invalid_value, data)
+    assert exceptions["Comment"].tolist() == [comment]
+    assert raised(data) == [("INVALID_VALUE", "cashflows", "Amount")]
+
+
+@pytest.mark.parametrize("cashflow_type, amount", [("Fee", -4500.0), ("Coupon", 75000.0),
+                                                   ("Principal", 0.01)])
+def test_amount_with_the_right_sign_is_valid(cashflow_type, amount):
+    data = make_data(cashflows=[cashflow(CashflowType=cashflow_type, Amount=amount)])
+    assert raised(data) == []
+
+
+def test_amount_sign_is_not_checked_on_an_unknown_cashflow_type():
+    data = make_data(cashflows=[cashflow(CashflowType="Dividend", Amount=-1.0)])
+    assert raised(data) == [("INVALID_VALUE", "cashflows", "CashflowType")]
