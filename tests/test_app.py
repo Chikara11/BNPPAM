@@ -5,7 +5,8 @@ import re
 import pandas as pd
 from streamlit.testing.v1 import AppTest
 
-from dq.report import BREACH_TINT, SEVERITY_TINTS
+from dq.report import (BREACH_TINT, COLUMN_BLOCK_TITLE, DIMENSION_BLOCK_TITLE, PLAUSIBILITY_NOTE,
+                       SEVERITY_TINTS)
 from helpers import REPO_ROOT
 
 APP = str(REPO_ROOT / "app.py")
@@ -198,3 +199,19 @@ def test_app_large_sample_strips_show_every_computed_move_at_a_fixed_height():
                [trace["x"] for trace in spec["data"]])
     assert dots == (moves["MoveStatus"] == "Computed").sum()
     assert {spec["layout"]["height"] for spec in specs.values()} == {260}
+
+
+def test_app_data_quality_tab_shows_the_dimension_block_then_the_column_table():
+    tab = started().tabs[4]
+    assert [header.value for header in tab.subheader] == [DIMENSION_BLOCK_TITLE,
+                                                          COLUMN_BLOCK_TITLE]
+    assert PLAUSIBILITY_NOTE in [caption.value for caption in tab.caption]
+    block, columns = tab.dataframe[0].value, tab.dataframe[1].value
+    assert block["Dimension"].tolist()[0] == "Completeness" and len(block) == 6
+    assert block["Exceptions"].sum() == 15
+    assert "CompletenessPct" in columns.columns
+
+
+def test_app_exceptions_table_has_the_dimension_column():
+    shown = exceptions_shown(started())
+    assert list(shown.columns[:4]) == ["ExceptionID", "Severity", "ControlID", "Dimension"]

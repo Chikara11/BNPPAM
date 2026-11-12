@@ -11,9 +11,10 @@ import pytest
 
 from dq.config import with_overrides
 from dq.engine import run
-from dq.report import write_report
-from dq.schema import (DATA_QUALITY_COLUMNS, EXCEPTION_COLUMNS, PRICE_MOVEMENT_COLUMNS,
-                       UPCOMING_CASHFLOW_COLUMNS)
+from dq.report import (COLUMN_BLOCK_TITLE, DIMENSION_BLOCK_TITLE, PLAUSIBILITY_NOTE,
+                       write_report)
+from dq.schema import (DATA_QUALITY_COLUMNS, DIMENSION_QUALITY_COLUMNS, EXCEPTION_COLUMNS,
+                       PRICE_MOVEMENT_COLUMNS, UPCOMING_CASHFLOW_COLUMNS)
 from helpers import CONFIG, CONFIG_PATH, REPO_ROOT
 
 INPUTS = str(REPO_ROOT / "data" / "inputs")
@@ -24,8 +25,7 @@ SHEETS = ["Executive Summary", "Exceptions", "Price Movements", "Cashflows 30D",
           "Data Quality", "Parameters"]
 TABLES = [("Exceptions", "exceptions", EXCEPTION_COLUMNS),
           ("Price Movements", "price_movements", PRICE_MOVEMENT_COLUMNS),
-          ("Cashflows 30D", "upcoming_cashflows", UPCOMING_CASHFLOW_COLUMNS),
-          ("Data Quality", "data_quality", DATA_QUALITY_COLUMNS)]
+          ("Cashflows 30D", "upcoming_cashflows", UPCOMING_CASHFLOW_COLUMNS)]
 PERCENT_COLUMNS = ("PriceChangePct", "ThresholdPct", "CompletenessPct")
 
 
@@ -87,7 +87,6 @@ def test_report_values_are_copied_from_the_results(workbook, input_results):
     ("Price Movements", "PreviousDate", "YYYY-MM-DD"),
     ("Cashflows 30D", "CashflowDate", "YYYY-MM-DD"),
     ("Cashflows 30D", "Amount", "#,##0.00"),
-    ("Data Quality", "CompletenessPct %", "0.00"),
 ])
 def test_report_columns_have_the_documented_number_format(workbook, sheet_name, column,
                                                           number_format):
@@ -111,7 +110,7 @@ def test_report_breach_rows_are_highlighted(workbook, input_results):
     assert sum(filled) == 3
 
 
-@pytest.mark.parametrize("sheet_name", SHEETS[1:])
+@pytest.mark.parametrize("sheet_name", [name for name in SHEETS[1:] if name != "Data Quality"])
 def test_report_table_header_is_frozen_and_filtered(workbook, sheet_name):
     sheet = workbook[sheet_name]
     assert sheet.freeze_panes == "A2"
@@ -220,3 +219,33 @@ def test_run_report_unwritable_output_exits_1(tmp_path, capsys):
     assert run_report.main(["--inputs", INPUTS, "--config", str(CONFIG_PATH),
                             "--output", str(tmp_path / "report.xlsx")]) == 1
     assert "cannot write the report" in capsys.readouterr().err
+
+
+def row_values(sheet, row: int, width: int) -> list:
+    return [sheet.cell(row=row, column=column).value for column in range(1, width + 1)]
+
+
+def test_report_data_quality_sheet_has_the_dimension_block_then_the_column_table(
+        workbook, input_results):
+    sheet = workbook["Data Quality"]
+    block, columns = input_results.dimension_quality, input_results.data_quality
+    assert sheet["A1"].value == DIMENSION_BLOCK_TITLE
+    assert row_values(sheet, 2, len(block.columns)) == list(DIMENSION_QUALITY_COLUMNS)
+    for offset, row in enumerate(block.itertuples(index=False)):
+        assert row_values(sheet, 3 + offset, len(block.columns)) == list(row)
+    note_row = 3 + len(block)
+    assert sheet.cell(row=note_row, column=1).value == PLAUSIBILITY_NOTE
+    assert sheet.cell(row=note_row + 2, column=1).value == COLUMN_BLOCK_TITLE
+    header_row = note_row + 3
+    assert row_values(sheet, header_row, len(columns.columns)) == [
+        f"{name} %" if name == "CompletenessPct" else name for name in DATA_QUALITY_COLUMNS]
+    assert sheet.max_row == header_row + len(columns)
+    assert sheet.cell(row=header_row + 1, column=len(columns.columns)).number_format == "0.00"
+
+
+def test_report_data_quality_filter_is_on_the_column_table_without_freeze(workbook,
+                                                                          input_results):
+    sheet = workbook["Data Quality"]
+    header_row = 3 + len(input_results.dimension_quality) + 3
+    assert sheet.freeze_panes is None
+    assert sheet.auto_filter.ref == f"A{header_row}:H{header_row + len(input_results.data_quality)}"

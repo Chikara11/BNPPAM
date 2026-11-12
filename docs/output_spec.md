@@ -214,7 +214,7 @@ The reference date is not a row: it is `Results.reference_date`.
 | 2 | Exceptions | `exceptions`, severity colours, filters, frozen header |
 | 3 | Price Movements | `price_movements`, breaches highlighted |
 | 4 | Cashflows {N}D | `upcoming_cashflows`; N = horizon in days |
-| 5 | Data Quality | `data_quality` |
+| 5 | Data Quality | "Checks by dimension": `dimension_quality`, then the note "Plausibility = review alerts (e.g. large price moves), not necessarily data errors."; a blank row; "Completeness by column": `data_quality`. Autofilter on the column table only, no frozen header (Excel allows one filter per sheet) |
 | 6 | Parameters | Config used for the run: `Parameter`, `Value` (text), one row per setting |
 
 **[Decision]** Number formats: amounts `#,##0.00`, prices `0.00`,

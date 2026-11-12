@@ -11,7 +11,8 @@ from pandas.io.formats.style import Styler
 from dq import (Config, ConfigError, InputData, InputSchemaError, RegistryError, Results,
                 load_config, load_inputs, run, with_overrides)
 from dq.config import INPUT_FILES, SEVERITIES
-from dq.report import (AMOUNT_FORMAT, BREACH_TINT, COLUMN_FORMATS, DATE_FORMAT, PRICE_FORMAT,
+from dq.report import (AMOUNT_FORMAT, BREACH_TINT, COLUMN_BLOCK_TITLE, COLUMN_FORMATS,
+                       DATE_FORMAT, DIMENSION_BLOCK_TITLE, PLAUSIBILITY_NOTE, PRICE_FORMAT,
                        SEVERITY_TINTS, write_report)
 from dq.schema import COMPUTED, NO_PORTFOLIO, SECTION_BY_CONTROL, SECTION_BY_SEVERITY
 
@@ -133,7 +134,16 @@ def show_tabs(results: Results) -> None:
                    f"(both included), Status not Paid.")
         show_table(results.upcoming_cashflows)
     with quality:
-        show_table(results.data_quality)
+        show_data_quality(results)
+
+
+def show_data_quality(results: Results) -> None:
+    # Same blocks, titles and note as the report's Data Quality sheet.
+    st.subheader(DIMENSION_BLOCK_TITLE)
+    show_table(results.dimension_quality)
+    st.caption(PLAUSIBILITY_NOTE)
+    st.subheader(COLUMN_BLOCK_TITLE)
+    show_table(results.data_quality)
 
 
 def show_summary(results: Results) -> None:

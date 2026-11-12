@@ -9,6 +9,7 @@ import pandas as pd
 from openpyxl import Workbook
 from openpyxl.cell import Cell
 from openpyxl.styles import Font, PatternFill
+from openpyxl.utils import get_column_letter
 from openpyxl.worksheet.worksheet import Worksheet
 
 from dq.config import Config
@@ -22,6 +23,11 @@ EXCEPTIONS_SHEET = "Exceptions"
 PRICE_MOVEMENTS_SHEET = "Price Movements"
 CASHFLOWS_SHEET = "Cashflows {days}D"  # days = cashflow_horizon_days of the run
 DATA_QUALITY_SHEET = "Data Quality"
+# Titles and note of the Data Quality sheet, also used by the app's tab.
+DIMENSION_BLOCK_TITLE = "Checks by dimension"
+COLUMN_BLOCK_TITLE = "Completeness by column"
+PLAUSIBILITY_NOTE = ("Plausibility = review alerts (e.g. large price moves), not necessarily "
+                     "data errors.")
 PARAMETERS_SHEET = "Parameters"
 
 AMOUNT_FORMAT = "#,##0.00"
@@ -41,6 +47,7 @@ COLUMN_FORMATS = {
 UNIT_FORMATS = {"count": COUNT_FORMAT, "amount": AMOUNT_FORMAT, "pct": PERCENT_FORMAT}
 
 HEADER_FONT = Font(bold=True)
+NOTE_FONT = Font(italic=True)
 HEADER_FILL = PatternFill(fill_type="solid", start_color="D9D9D9")
 # Tints also used by app.py, so the report and the app look the same.
 SEVERITY_TINTS = {"Critical": "FFC7CE", "Warning": "FFD8A8", "Information": "BDD7EE"}
@@ -70,24 +77,44 @@ def write_report(results: Results, path_or_buffer: str | Path | IO[bytes], *,
                        results.price_movements)
     write_table(workbook, CASHFLOWS_SHEET.format(days=results.config.cashflow_horizon_days),
                 results.upcoming_cashflows)
-    write_table(workbook, DATA_QUALITY_SHEET, results.data_quality)
+    write_data_quality(workbook, results)
     write_table(workbook, PARAMETERS_SHEET, parameters_table(results.config))
     workbook.save(path_or_buffer)
 
 
 def write_table(workbook: Workbook, title: str, frame: pd.DataFrame) -> Worksheet:
-    # One header row, then the rows of the frame as they are: no calculation.
     sheet = workbook.create_sheet(title)
-    for column, name in enumerate(frame.columns, start=1):
-        style_header(write_cell(sheet, 1, column, header_name(name)))
-    formats = [COLUMN_FORMATS.get(name) for name in frame.columns]
-    for row, values in enumerate(frame.itertuples(index=False), start=2):
-        for column, (value, number_format) in enumerate(zip(values, formats), start=1):
-            write_cell(sheet, row, column, value, number_format)
+    write_frame(sheet, frame, 1)
     sheet.freeze_panes = "A2"
     sheet.auto_filter.ref = sheet.dimensions
     fit_columns(sheet)
     return sheet
+
+
+def write_frame(sheet: Worksheet, frame: pd.DataFrame, first_row: int) -> str:
+    # One header row, then the rows of the frame as they are: no calculation.
+    # Returns the range written, e.g. "A5:H27".
+    for column, name in enumerate(frame.columns, start=1):
+        style_header(write_cell(sheet, first_row, column, header_name(name)))
+    formats = [COLUMN_FORMATS.get(name) for name in frame.columns]
+    for row, values in enumerate(frame.itertuples(index=False), start=first_row + 1):
+        for column, (value, number_format) in enumerate(zip(values, formats), start=1):
+            write_cell(sheet, row, column, value, number_format)
+    last_row = first_row + len(frame)
+    return f"A{first_row}:{get_column_letter(len(frame.columns))}{last_row}"
+
+
+def write_data_quality(workbook: Workbook, results: Results) -> None:
+    # Two blocks on one sheet. Excel allows one autofilter per sheet: it goes
+    # on the column table; no frozen header, since the sheet has two.
+    sheet = workbook.create_sheet(DATA_QUALITY_SHEET)
+    write_cell(sheet, 1, 1, DIMENSION_BLOCK_TITLE).font = HEADER_FONT
+    write_frame(sheet, results.dimension_quality, 2)
+    note_row = 2 + len(results.dimension_quality) + 1  # header on row 2, then the rows
+    write_cell(sheet, note_row, 1, PLAUSIBILITY_NOTE).font = NOTE_FONT
+    write_cell(sheet, note_row + 2, 1, COLUMN_BLOCK_TITLE).font = HEADER_FONT
+    sheet.auto_filter.ref = write_frame(sheet, results.data_quality, note_row + 3)
+    fit_columns(sheet, skip_rows={1, note_row, note_row + 2})
 
 
 def write_executive_summary(workbook: Workbook, results: Results,
@@ -179,9 +206,10 @@ def highlight_breaches(sheet: Worksheet, moves: pd.DataFrame) -> None:
                 cell.fill = BREACH_FILL
 
 
-def fit_columns(sheet: Worksheet) -> None:
+def fit_columns(sheet: Worksheet, skip_rows: set[int] = frozenset()) -> None:
+    # skip_rows: titles and notes that may run over the next columns.
     for cells in sheet.columns:
         lengths = [DATE_WIDTH if isinstance(cell.value, datetime.datetime) else len(str(cell.value))
-                   for cell in cells if cell.value is not None]
+                   for cell in cells if cell.value is not None and cell.row not in skip_rows]
         width = min(max(lengths, default=0) + 2, MAX_COLUMN_WIDTH)
         sheet.column_dimensions[cells[0].column_letter].width = width

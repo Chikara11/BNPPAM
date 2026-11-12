@@ -335,6 +335,10 @@ the price change formula and its rounding are those of `CLAUDE.md`.
 - The Executive Summary shows the reference date, the run timestamp, then
   `Results.summary` section by section, including "Position rows not at the
   reference date (ignored)".
+- The Data Quality sheet holds two blocks: "Checks by dimension"
+  (`Results.dimension_quality`, then the Plausibility note) and
+  "Completeness by column" (`Results.data_quality`), with the autofilter on
+  the second and no frozen header.
 - Formatting only (headers, number formats, column widths, severity tint on
   the Severity cell, breach rows highlighted, frozen header, filters). No
   calculation. Sheet names, number formats and colours are presentation
@@ -360,7 +364,9 @@ the price change formula and its rounding are those of `CLAUDE.md`.
 - Tabs: Summary (severity metrics, exceptions-by-control chart, every
   `Results.summary` section, including "Position rows not at the reference
   date (ignored)"), Exceptions (filters by severity, control, portfolio;
-  they only hide rows), Price Movements, Cashflows {N}D, Data Quality.
+  they only hide rows), Price Movements, Cashflows {N}D, Data Quality
+  ("Checks by dimension" with the Plausibility note, then "Completeness by
+  column", the same titles and note as the report, from `report.py`).
 - Price Movements chart: one dot strip per asset type (the thresholds
   differ), one dot per computed position on the x axis (change in %),
   breach / within threshold colours with a legend, dashed ±threshold lines,
