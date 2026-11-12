@@ -1,0 +1,202 @@
+from __future__ import annotations
+
+import datetime
+import numbers
+import zipfile
+from dataclasses import dataclass
+from pathlib import Path
+from typing import IO, Any
+
+import numpy as np
+import pandas as pd
+from openpyxl.utils.exceptions import InvalidFileException
+
+from dq.config import INPUT_FILES, Config
+
+# Column types of docs/data_spec.md. Columns not listed here are kept as read.
+COLUMN_TYPES = {
+    "positions": {
+        "ValuationDate": "date", "Portfolio": "text", "ISIN": "text",
+        "SecurityName": "text", "AssetType": "text", "Currency": "text",
+        "Nominal": "number", "BookPrice": "number", "MarketPrice": "number",
+        "Rating": "text", "MaturityDate": "date",
+    },
+    "previous_prices": {
+        "ISIN": "text", "PreviousDate": "date", "PreviousPrice": "number",
+        "PriceSource": "text",
+    },
+    "cashflows": {
+        "Portfolio": "text", "ISIN": "text", "CashflowDate": "date",
+        "CashflowType": "text", "Currency": "text", "Amount": "number",
+        "Status": "text",
+    },
+}
+
+# docs/output_spec.md section 0
+PARSE_ISSUE_COLUMNS = {"File": "object", "SourceRow": "Int64", "Column": "object",
+                       "RawValue": "object"}
+
+Source = str | Path | IO[bytes]
+
+
+class InputSchemaError(Exception):
+    pass
+
+
+@dataclass(frozen=True)
+class InputData:
+    positions: pd.DataFrame
+    previous_prices: pd.DataFrame
+    cashflows: pd.DataFrame
+    parse_issues: pd.DataFrame
+
+
+def load_inputs(positions: Source, previous_prices: Source, cashflows: Source,
+                config: Config) -> InputData:
+    sources = {"positions": positions, "previous_prices": previous_prices,
+               "cashflows": cashflows}
+    frames, issues = {}, []
+    for file in INPUT_FILES:
+        raw = read_raw(sources[file], file)
+        check_required_columns(raw, file, config.required_columns[file])
+        frames[file], file_issues = convert_file(raw, file)
+        issues.append(file_issues)
+    return InputData(**frames, parse_issues=sort_parse_issues(pd.concat(issues)))
+
+
+def read_raw(source: Source, file: str) -> pd.DataFrame:
+    name = source_name(source, file)
+    if hasattr(source, "seek"):
+        source.seek(0)  # an uploaded file may already have been read once
+    try:
+        # header=None: the header row is read as data so that a duplicated
+        # column name can be detected before pandas renames it "X.1"
+        sheet = pd.read_excel(source, sheet_name=0, header=None, dtype=object)
+    except (OSError, ValueError, zipfile.BadZipFile, InvalidFileException) as error:
+        raise InputSchemaError(f"The {file} file ({name}) cannot be read as an Excel "
+                               f"workbook: {error}") from error
+    if sheet.empty:
+        raise InputSchemaError(f"The {file} file ({name}) is empty: no header row.")
+    header = [header_name(value, position) for position, value in enumerate(sheet.iloc[0])]
+    duplicated = sorted({name for name in header if header.count(name) > 1})
+    if duplicated:
+        raise InputSchemaError(f"The {file} file ({name}) has duplicated column name(s) "
+                               f"in its header: {', '.join(duplicated)}.")
+    data = sheet.iloc[1:].copy()
+    data.columns = header
+    data["SourceRow"] = pd.array(data.index + 1, dtype="Int64")  # header = Excel row 1
+    return data.reset_index(drop=True)
+
+
+def check_required_columns(raw: pd.DataFrame, file: str, required: tuple[str, ...]) -> None:
+    missing = [column for column in required if column not in raw.columns]
+    if missing:
+        raise InputSchemaError(f"The {file} file is missing required column(s): "
+                               f"{', '.join(missing)}. Processing stopped.")
+
+
+def convert_file(raw: pd.DataFrame, file: str) -> tuple[pd.DataFrame, pd.DataFrame]:
+    converted = raw.copy()
+    issues = []
+    for column in raw.columns.drop("SourceRow"):
+        kind = COLUMN_TYPES[file].get(column)
+        values, failed = convert_column(raw[column], kind)
+        converted[column] = values
+        issues.append(pd.DataFrame({
+            "File": file,
+            "SourceRow": raw.loc[failed, "SourceRow"],
+            "Column": column,
+            "RawValue": raw.loc[failed, column].map(str),
+        }))
+    return converted, pd.concat(issues) if issues else empty_parse_issues()
+
+
+def convert_column(raw: pd.Series, kind: str | None) -> tuple[pd.Series, pd.Series]:
+    blank = raw.map(is_blank).astype(bool)
+    if kind is None:
+        values = pd.Series([None if is_empty else value
+                            for value, is_empty in zip(raw, blank)],
+                           index=raw.index, dtype="object")
+        return values, pd.Series(False, index=raw.index)
+    accepted = raw.map(ACCEPTS[kind]).astype(bool) & ~blank
+    failed = ~accepted & ~blank
+    keep = [value if ok else None for value, ok in zip(raw, accepted)]
+    if kind == "text":
+        values = pd.Series(keep, index=raw.index, dtype="object")
+    elif kind == "number":
+        values = pd.Series([np.nan if value is None else float(value) for value in keep],
+                           index=raw.index, dtype="float64")
+    else:
+        values = pd.Series([pd.NaT if value is None else pd.Timestamp(value) for value in keep],
+                           index=raw.index).astype("datetime64[us]").dt.normalize()
+    return values, failed
+
+
+def is_blank(value: Any) -> bool:
+    if isinstance(value, str):
+        return not value.strip()
+    return value is None or bool(pd.isna(value))
+
+
+def is_number_cell(value: Any) -> bool:
+    return isinstance(value, numbers.Real) and not isinstance(value, bool)
+
+
+def is_date_cell(value: Any) -> bool:
+    return isinstance(value, datetime.date)  # also covers datetime and Timestamp
+
+
+ACCEPTS = {
+    "text": lambda value: isinstance(value, str),
+    "number": is_number_cell,
+    "date": is_date_cell,
+}
+
+
+def truly_missing(data: InputData, file: str, column: str) -> pd.Series:
+    frame = getattr(data, file)
+    issues = data.parse_issues
+    unparsed = issues.loc[(issues["File"] == file) & (issues["Column"] == column), "SourceRow"]
+    return frame[column].isna() & ~frame["SourceRow"].isin(unparsed)
+
+
+def empty_rows(data: InputData, file: str) -> pd.Series:
+    frame = getattr(data, file)
+    issues = data.parse_issues
+    unparsed = issues.loc[issues["File"] == file, "SourceRow"]
+    all_empty = frame.drop(columns="SourceRow").isna().all(axis=1)
+    return all_empty & ~frame["SourceRow"].isin(unparsed)
+
+
+def sort_parse_issues(issues: pd.DataFrame) -> pd.DataFrame:
+    if issues.empty:
+        return empty_parse_issues()
+    file_rank = issues["File"].map(INPUT_FILES.index)
+    column_rank = [column_order(file, column) for file, column in zip(issues["File"],
+                                                                         issues["Column"])]
+    ordered = issues.assign(_file=file_rank, _column=column_rank).sort_values(
+        ["_file", "SourceRow", "_column"], kind="stable")
+    return ordered.drop(columns=["_file", "_column"]).reset_index(drop=True).astype(
+        PARSE_ISSUE_COLUMNS)
+
+
+def column_order(file: str, column: str) -> int:
+    known = list(COLUMN_TYPES[file])
+    return known.index(column) if column in known else len(known)
+
+
+def empty_parse_issues() -> pd.DataFrame:
+    return pd.DataFrame({column: pd.Series(dtype=dtype)
+                         for column, dtype in PARSE_ISSUE_COLUMNS.items()})
+
+
+def header_name(value: Any, position: int) -> str:
+    if is_blank(value):
+        return f"Unnamed: {position}"
+    return value if isinstance(value, str) else str(value)
+
+
+def source_name(source: Source, file: str) -> str:
+    if isinstance(source, (str, Path)):
+        return str(source)
+    return getattr(source, "name", f"uploaded {file} file")
