@@ -1,5 +1,32 @@
 # CLO / ABS Portfolio Monitoring Prototype
 
+Data quality and price monitoring of CLO Debt, CLO Equity and ABS positions:
+3 Excel inputs, deterministic controls driven by `config.yaml`, an Excel
+report and a Streamlit app. All data is synthetic (identifiers `SYN` + 9
+digits); no real portfolio or market data.
+
+## Run locally
+
+Python 3.12, from the repo root:
+
+```
+python3.12 -m venv .venv
+.venv/bin/python -m pip install -r requirements.txt
+.venv/bin/streamlit run app.py                    # the app, http://localhost:8501
+.venv/bin/python -m scripts.run_report --inputs data/inputs --output output/report.xlsx
+.venv/bin/python -m pytest -q -W error            # the tests
+```
+
+The app opens on the bundled sample (`data/inputs/`); the sidebar also
+accepts an upload of the 3 files.
+
+## Deployed app
+
+<URL to be added after deployment on Streamlit Community Cloud>
+
+Streamlit Community Cloud, main file `app.py`, Python 3.12. The app is
+public: upload synthetic files only, never real portfolio data.
+
 ## Possible improvements
 
 Found by the clean-code review of 2026-11-12 and deliberately left out of
