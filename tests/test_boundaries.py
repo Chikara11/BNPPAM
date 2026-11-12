@@ -1,13 +1,9 @@
-from pathlib import Path
-
 import pytest
 
-from dq.config import load_config, with_overrides
+from dq.config import with_overrides
 from dq.controls.prices import check_price_move_above_threshold
 from dq.engine import run
-from test_controls import check, make_data, position, price
-
-CONFIG = load_config(Path(__file__).resolve().parent.parent / "config.yaml")
+from helpers import CONFIG, check, make_data, position, price
 
 
 def price_alerts(asset_type: str, previous_price: float, market_price: float, config=CONFIG):

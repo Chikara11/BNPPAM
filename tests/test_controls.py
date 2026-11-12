@@ -1,70 +1,12 @@
-from pathlib import Path
-
-import pandas as pd
 import pytest
 
-from dq.config import COLUMN_TYPES, load_config, with_overrides
-from dq.context import build_context
+from dq.config import with_overrides
+from dq.context import build_context, positions_at_reference_date
+from dq.controls import cashflows as cashflow_controls
 from dq.controls import positions as position_controls
 from dq.controls import prices as price_controls
-from dq.loaders import InputData, empty_parse_issues
-
-CONFIG = load_config(Path(__file__).resolve().parent.parent / "config.yaml")
-
-POSITION = {
-    "ValuationDate": "2026-11-11", "Portfolio": "CLO_EURO_01", "ISIN": "SYN000000001",
-    "SecurityName": "Aurora CLO 2023-1 B", "AssetType": "CLO Debt", "Currency": "EUR",
-    "Nominal": 5000000.0, "BookPrice": 99.2, "MarketPrice": 98.75, "Rating": "AA",
-    "MaturityDate": "2036-04-15",
-}
-PREVIOUS_PRICE = {
-    "ISIN": "SYN000000001", "PreviousDate": "2026-11-04", "PreviousPrice": 99.1,
-    "PriceSource": "Pricing Agent",
-}
-CASHFLOW = {
-    "Portfolio": "CLO_EURO_01", "ISIN": "SYN000000001", "CashflowDate": "2026-11-25",
-    "CashflowType": "Coupon", "Currency": "EUR", "Amount": 75000.0, "Status": "Confirmed",
-}
-
-
-def frame(file: str, rows: list[dict]) -> pd.DataFrame:
-    # Same columns and dtypes as the loader, SourceRow from Excel row 2.
-    result = pd.DataFrame(rows, columns=list(COLUMN_TYPES[file]))
-    for column, kind in COLUMN_TYPES[file].items():
-        if kind == "date":
-            result[column] = pd.to_datetime(result[column]).astype("datetime64[us]")
-        else:
-            result[column] = result[column].astype("float64" if kind == "number" else object)
-    result["SourceRow"] = pd.array(range(2, len(result) + 2), dtype="Int64")
-    return result
-
-
-def make_data(positions: list[dict] | None = None, previous_prices: list[dict] | None = None,
-              cashflows: list[dict] | None = None,
-              parse_issues: pd.DataFrame | None = None) -> InputData:
-    return InputData(
-        positions=frame("positions", [POSITION] if positions is None else positions),
-        previous_prices=frame("previous_prices",
-                              [PREVIOUS_PRICE] if previous_prices is None else previous_prices),
-        cashflows=frame("cashflows", [CASHFLOW] if cashflows is None else cashflows),
-        parse_issues=empty_parse_issues() if parse_issues is None else parse_issues,
-    )
-
-
-def position(**changes) -> dict:
-    return {**POSITION, **changes}
-
-
-def check(control, data: InputData, config=CONFIG) -> pd.DataFrame:
-    return control(data, build_context(data, config))
-
-
-def parse_issue(file: str, source_row: int, column: str, raw: str) -> pd.DataFrame:
-    return pd.DataFrame({"File": [file], "SourceRow": pd.array([source_row], dtype="Int64"),
-                         "Column": [column], "RawValue": [raw]})
-
-
-EMPTY_POSITION = {column: None for column in POSITION}
+from helpers import (CONFIG, EMPTY_POSITION, cashflow, check, make_data, parse_issue,
+                     position, price)
 
 
 def test_missing_isin_fires():
@@ -162,10 +104,6 @@ def test_missing_rating_follows_the_config():
     config = with_overrides(CONFIG, {"rating_required_for": ["ABS"]})
     data = make_data([position(AssetType="CLO Debt", Rating=None)])
     assert check(position_controls.check_missing_rating, data, config).empty
-
-
-def price(**changes) -> dict:
-    return {**PREVIOUS_PRICE, **changes}
 
 
 def test_no_price_history_fires_when_the_isin_has_no_price_row():
@@ -267,3 +205,100 @@ def test_duplicate_previous_price_ignores_securities_not_held():
     data = make_data(previous_prices=[price(), price(ISIN="SYN000000099"),
                                       price(ISIN="SYN000000099")])
     assert check(price_controls.check_duplicate_previous_price, data).empty
+
+
+def test_unmatched_cashflow_fires_on_an_unknown_portfolio_isin_pair():
+    data = make_data(cashflows=[cashflow(ISIN="SYN999999999")])
+    exceptions = check(cashflow_controls.check_unmatched_cashflow, data)
+    exception = exceptions.iloc[0]
+    assert len(exceptions) == 1
+    assert (exception["Field"], exception["ObservedValue"]) == (
+        "Portfolio+ISIN", "CLO_EURO_01+SYN999999999")
+    assert exception["SecurityName"] is None
+
+
+def test_isin_held_in_another_portfolio_is_still_unmatched():
+    data = make_data(cashflows=[cashflow(Portfolio="CLO_GLOBAL_02")])
+    assert len(check(cashflow_controls.check_unmatched_cashflow, data)) == 1
+
+
+def test_matched_cashflow_is_not_unmatched():
+    assert check(cashflow_controls.check_unmatched_cashflow, make_data()).empty
+
+
+@pytest.mark.parametrize("column", ["Portfolio", "ISIN"])
+def test_cashflow_with_an_empty_key_is_not_unmatched(column):
+    # The empty value is reported by MISSING_VALUE.
+    data = make_data(cashflows=[cashflow(**{column: None})])
+    assert check(cashflow_controls.check_unmatched_cashflow, data).empty
+
+
+def test_cashflow_of_a_position_outside_the_reference_date_is_unmatched():
+    # The engine only keeps positions at the reference date.
+    data = make_data([position(), position(ValuationDate="2026-11-04", ISIN="SYN000000002")],
+                     cashflows=[cashflow(ISIN="SYN000000002")])
+    ctx = build_context(data, CONFIG)
+    exceptions = cashflow_controls.check_unmatched_cashflow(
+        positions_at_reference_date(data, ctx), ctx)
+    assert exceptions["ISIN"].tolist() == ["SYN000000002"]
+
+
+def test_duplicated_position_does_not_duplicate_cashflow_checks():
+    # Rule 4: membership test, never a row join.
+    data = make_data([position(), position()], cashflows=[cashflow(Currency="USD")])
+    assert len(check(cashflow_controls.check_currency_mismatch, data)) == 1
+    assert check(cashflow_controls.check_unmatched_cashflow, data).empty
+
+
+def test_duplicate_cashflow_fires_once_per_key():
+    data = make_data(cashflows=[cashflow(), cashflow(), cashflow(Amount=75000.01)])
+    exceptions = check(cashflow_controls.check_duplicate_cashflow, data)
+    assert len(exceptions) == 1
+    assert exceptions.iloc[0]["SourceRow"] == 2
+    assert "Excel rows 2, 3" in exceptions.iloc[0]["Comment"]
+    assert exceptions.iloc[0]["SecurityName"] == "Aurora CLO 2023-1 B"
+
+
+@pytest.mark.parametrize("changes", [{"Amount": 75000.01}, {"CashflowType": "Principal"},
+                                     {"CashflowDate": "2026-11-26"},
+                                     {"Portfolio": "CLO_GLOBAL_02"}])
+def test_cashflows_differing_on_one_key_column_are_not_duplicates(changes):
+    data = make_data(cashflows=[cashflow(), cashflow(**changes)])
+    assert check(cashflow_controls.check_duplicate_cashflow, data).empty
+
+
+def test_past_forecast_cashflow_fires_before_the_reference_date():
+    data = make_data(cashflows=[cashflow(CashflowDate="2026-11-06", Status="Forecast")])
+    exceptions = check(cashflow_controls.check_past_forecast_cashflow, data)
+    assert exceptions[["ControlID", "Field", "ObservedValue"]].values.tolist() == [
+        ["PAST_FORECAST_CASHFLOW", "CashflowDate", "2026-11-06"]]
+
+
+@pytest.mark.parametrize("cashflow_date, status", [
+    ("2026-11-11", "Forecast"),   # on the reference date: not past-dated
+    ("2026-11-06", "Paid"),
+    ("2026-11-06", "Confirmed"),
+    ("2026-11-06", " Forecast"),  # not an allowed value: INVALID_VALUE only
+])
+def test_past_forecast_cashflow_does_not_fire(cashflow_date, status):
+    data = make_data(cashflows=[cashflow(CashflowDate=cashflow_date, Status=status)])
+    assert check(cashflow_controls.check_past_forecast_cashflow, data).empty
+
+
+def test_currency_mismatch_fires_on_a_matched_cashflow():
+    data = make_data(cashflows=[cashflow(Currency="USD")])
+    exceptions = check(cashflow_controls.check_currency_mismatch, data)
+    assert exceptions[["ControlID", "Severity", "ObservedValue"]].values.tolist() == [
+        ["CURRENCY_MISMATCH", "Information", "USD"]]
+    assert exceptions.iloc[0]["Comment"] == "Cashflow in USD, position in EUR."
+
+
+@pytest.mark.parametrize("changes", [
+    {},                                        # same currency
+    {"ISIN": "SYN999999999", "Currency": "USD"},  # unmatched: rule 6
+    {"Currency": "eur"},                       # not an allowed value: INVALID_VALUE only
+    {"Currency": None},                        # empty: MISSING_VALUE only
+])
+def test_currency_mismatch_does_not_fire(changes):
+    data = make_data(cashflows=[cashflow(**changes)])
+    assert check(cashflow_controls.check_currency_mismatch, data).empty
