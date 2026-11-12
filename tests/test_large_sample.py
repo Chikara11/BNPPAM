@@ -164,3 +164,12 @@ def test_large_sample_dimension_block_matches_the_manifest(large_results, large_
     per_dimension = expected.groupby(dimension)["ExpectedExceptionCount"].sum()
     block = large_results.dimension_quality.set_index("Dimension")["Exceptions"]
     assert block.to_dict() == {name: per_dimension.get(name, 0) for name in CONFIG.dimensions}
+
+
+def test_large_sample_totals_use_allowed_currencies_only(large_results):
+    # The injected CHF position is reported by INVALID_VALUE and kept out of totals.
+    summary = large_results.summary
+    amounts = summary[summary["Unit"] == "amount"]
+    assert set(amounts["Currency"]) <= set(CONFIG.allowed_values["Currency"])
+    moves = large_results.price_movements
+    assert moves.loc[moves["Currency"] == "CHF", "MarketValue"].isna().all()

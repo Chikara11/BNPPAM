@@ -180,9 +180,12 @@ def price_change_pct(market_price: pd.Series, previous_price: pd.Series) -> pd.S
     return ((market_price - previous_price) / previous_price * 100).round(6)
 
 
-def market_value(nominal: pd.Series, market_price: pd.Series) -> pd.Series:
-    # Nominal * MarketPrice / 100, only when both are present and > 0.
-    return (nominal * market_price / 100).where((nominal > 0) & (market_price > 0))
+def market_value(nominal: pd.Series, market_price: pd.Series,
+                 allowed_currency: pd.Series) -> pd.Series:
+    # Nominal * MarketPrice / 100, only when both are present and > 0 and the
+    # currency is allowed: an invalid value never enters a total.
+    valid = (nominal > 0) & (market_price > 0) & allowed_currency
+    return (nominal * market_price / 100).where(valid)
 
 
 def price_move_table(data: InputData, ctx: Context) -> pd.DataFrame:
@@ -222,7 +225,8 @@ def price_move_table(data: InputData, ctx: Context) -> pd.DataFrame:
         "PreviousDate": previous["PreviousDate"], "PreviousPrice": previous_price,
         "MarketPrice": market_price, "PriceChangePct": change, "ThresholdPct": threshold,
         "Breach": breach, "MoveStatus": status,
-        "MarketValue": market_value(positions["Nominal"], market_price),
+        "MarketValue": market_value(positions["Nominal"], market_price,
+                                    positions["Currency"].isin(allowed_currencies(ctx))),
         "SourceRow": positions["SourceRow"],
     }, index=positions.index)
 
@@ -354,11 +358,15 @@ def portfolios_to_report(exceptions: pd.DataFrame, ctx: Context) -> list[str]:
     return known + others + [NO_PORTFOLIO]
 
 
+def allowed_currencies(ctx: Context) -> tuple[str, ...]:
+    return ctx.config.allowed_values.get("Currency", ())
+
+
 def totals_by_currency(frame: pd.DataFrame, column: str,
                        ctx: Context) -> list[tuple[str, float]]:
-    # Currencies in config.yaml order, then any other value found.
-    totals = frame.dropna(subset=["Currency"]).groupby("Currency")[column].sum()
-    known = [currency for currency in ctx.config.allowed_values.get("Currency", ())
-             if currency in totals.index]
-    others = sorted(set(totals.index) - set(known))
-    return [(currency, totals[currency]) for currency in known + others]
+    # Allowed currencies only, in config.yaml order: an amount in an unknown
+    # or empty currency (reported by INVALID_VALUE / MISSING_VALUE) never
+    # enters a total; its row stays in the table.
+    totals = frame.groupby("Currency")[column].sum()
+    return [(currency, totals[currency]) for currency in allowed_currencies(ctx)
+            if currency in totals.index]

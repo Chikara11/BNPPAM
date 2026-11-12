@@ -340,7 +340,8 @@ the price change formula and its rounding are those of `CLAUDE.md`.
   "Completeness by column" (`Results.data_quality`), with the autofilter on
   the second and no frozen header.
 - Formatting only (headers, number formats, column widths, severity tint on
-  the Severity cell, breach rows highlighted, frozen header, filters). No
+  the Severity cell, breach rows and unmatched cashflows highlighted, frozen
+  header, filters). No
   calculation. Sheet names, number formats and colours are presentation
   constants defined once in `report.py` (output_spec.md section 6).
 - Every text cell is stored as plain text, never as a formula: a value such
@@ -370,13 +371,16 @@ the price change formula and its rounding are those of `CLAUDE.md`.
 - Price Movements chart: one dot strip per asset type (the thresholds
   differ), one dot per computed position on the x axis (change in %),
   breach / within threshold colours with a legend, dashed ±threshold lines,
-  symmetric axis. The vertical spread is a fixed function of the Excel row
-  (no meaning, no randomness), so close dots stay visible; the same chart
-  reads at 50 or 500 positions. The hover names Portfolio · ISIN, with the
+  symmetric axis. The vertical spread is a fixed, continuous function of
+  the Excel row (multiples of the golden ratio; no meaning, no randomness);
+  dots within the threshold are semi-transparent (0.6), breaches opaque; a
+  panel with more than 100 dots is taller (420 px instead of 260 px), so the
+  same chart reads at 50 or 500 positions. The hover names Portfolio · ISIN, with the
   Excel row for a duplicated position.
-- Same look as the report: the severity and breach tints and the column
-  formats come from `report.py` (`SEVERITY_TINTS`, `BREACH_TINT`,
-  `COLUMN_FORMATS`), translated to Streamlit syntax.
+- Same look as the report: the severity, breach and unmatched-cashflow
+  tints and the column formats come from `report.py` (`SEVERITY_TINTS`,
+  `BREACH_TINT`, `UNMATCHED_TINT`, `COLUMN_FORMATS`), translated to
+  Streamlit syntax. The Controls column of the dimension block is wide.
 - Download button: the Excel report built by `report.write_report` with the
   current sidebar settings.
 - Config, input and registry errors are shown with `st.error`, never a

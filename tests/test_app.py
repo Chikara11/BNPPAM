@@ -6,7 +6,7 @@ import pandas as pd
 from streamlit.testing.v1 import AppTest
 
 from dq.report import (BREACH_TINT, COLUMN_BLOCK_TITLE, DIMENSION_BLOCK_TITLE, PLAUSIBILITY_NOTE,
-                       SEVERITY_TINTS)
+                       SEVERITY_TINTS, UNMATCHED_TINT)
 from helpers import REPO_ROOT
 
 APP = str(REPO_ROOT / "app.py")
@@ -190,15 +190,44 @@ def test_app_large_sample_shows_the_manifest_exceptions():
     assert len(exceptions_shown(app)) == expected["ExpectedExceptionCount"].sum()
 
 
-def test_app_large_sample_strips_show_every_computed_move_at_a_fixed_height():
+def strips(app: AppTest) -> dict[str, dict]:
+    return {name: spec for name, spec in chart_specs(app).items()
+            if name != "Exceptions by control"}
+
+
+def test_app_large_sample_strips_show_every_computed_move():
     app = large_sample(started())
     moves = app.tabs[2].dataframe[0].value
-    specs = {name: spec for name, spec in chart_specs(app).items()
-             if name != "Exceptions by control"}
-    dots = sum(len(x) for spec in specs.values() for x in
-               [trace["x"] for trace in spec["data"]])
+    dots = sum(len(trace["x"]) for spec in strips(app).values() for trace in spec["data"])
     assert dots == (moves["MoveStatus"] == "Computed").sum()
-    assert {spec["layout"]["height"] for spec in specs.values()} == {260}
+
+
+def test_app_strip_is_taller_above_100_dots():
+    for spec in strips(large_sample(started())).values():
+        dots = sum(len(trace["x"]) for trace in spec["data"])
+        assert spec["layout"]["height"] == (420 if dots > 100 else 260)
+
+
+def test_app_strip_dots_are_spread_and_breaches_stand_out():
+    for spec in strips(large_sample(started())).values():
+        heights = [y for trace in spec["data"] for y in trace["y"]]
+        assert len(set(heights)) == len(heights)  # one level per dot, no stacking
+        assert all(-0.8 <= y <= 0.8 for y in heights)
+        opacity = {trace["name"]: trace["marker"]["opacity"] for trace in spec["data"]}
+        assert opacity.get("Within threshold") == 0.6 and opacity.get("Breach", 1.0) == 1.0
+
+
+def test_app_unmatched_cashflows_are_tinted():
+    app = started()
+    table = app.tabs[3].dataframe[0]
+    unmatched = (~table.value["MatchedPosition"]).sum()
+    assert unmatched == 1  # A12
+    assert len(styled_rows(app, 3, UNMATCHED_TINT)) == unmatched
+
+
+def test_app_controls_column_is_wide():
+    columns = json.loads(started().tabs[4].dataframe[0].proto.columns)
+    assert columns["Controls"]["width"] == "large"
 
 
 def test_app_data_quality_tab_shows_the_dimension_block_then_the_column_table():

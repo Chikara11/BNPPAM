@@ -13,7 +13,7 @@ from dq import (Config, ConfigError, InputData, InputSchemaError, RegistryError,
 from dq.config import INPUT_FILES, SEVERITIES
 from dq.report import (AMOUNT_FORMAT, BREACH_TINT, COLUMN_BLOCK_TITLE, COLUMN_FORMATS,
                        DATE_FORMAT, DIMENSION_BLOCK_TITLE, PLAUSIBILITY_NOTE, PRICE_FORMAT,
-                       SEVERITY_TINTS, write_report)
+                       SEVERITY_TINTS, UNMATCHED_TINT, write_report)
 from dq.schema import COMPUTED, NO_PORTFOLIO, SECTION_BY_CONTROL, SECTION_BY_SEVERITY
 
 # Display only (architecture.md section 4.9): every number comes from
@@ -39,8 +39,12 @@ SERIES_COLOUR = "#2a78d6"
 BREACH_COLOUR = "#d03b3b"
 RULE_COLOUR = "#898781"
 BAR_HEIGHT = 26  # pixels per bar of the control chart
-STRIP_HEIGHT = 260  # pixels per price-move panel, whatever the number of positions
+STRIP_HEIGHT = 260  # pixels per price-move panel
+TALL_STRIP_HEIGHT = 420  # for a panel with many dots, so they stay apart
+DOTS_FOR_TALL_STRIP = 100
 DOT_SIZE = 9
+WITHIN_OPACITY = 0.6  # overlapping dots show their density; breaches stay opaque
+GOLDEN_RATIO = 0.6180339887
 
 
 def main() -> None:
@@ -132,7 +136,9 @@ def show_tabs(results: Results) -> None:
     with cashflows:
         st.caption(f"Cashflows dated from the reference date to {days} days after it "
                    f"(both included), Status not Paid.")
-        show_table(results.upcoming_cashflows)
+        upcoming = results.upcoming_cashflows
+        show_table(tinted_rows(upcoming, ~upcoming["MatchedPosition"].astype(bool),
+                               UNMATCHED_TINT))
     with quality:
         show_data_quality(results)
 
@@ -195,7 +201,7 @@ def show_price_movements(moves: pd.DataFrame) -> None:
     computed = moves[moves["MoveStatus"] == COMPUTED]
     for asset_type, rows in computed.groupby("AssetType", sort=True):
         st.plotly_chart(price_move_figure(asset_type, rows), key=f"moves_{asset_type}")
-    show_table(moves.style.apply(breach_css, axis=None))
+    show_table(tinted_rows(moves, moves["Breach"].fillna(False).astype(bool), BREACH_TINT))
 
 
 def price_move_figure(asset_type: str, rows: pd.DataFrame) -> go.Figure:
@@ -215,6 +221,7 @@ def price_move_figure(asset_type: str, rows: pd.DataFrame) -> go.Figure:
                 x=rows.loc[selected, "PriceChangePct"].tolist(), y=spread[selected].tolist(),
                 text=labels[selected].tolist(), mode="markers", name=name,
                 marker={"color": colour, "size": DOT_SIZE,
+                        "opacity": 1.0 if name == "Breach" else WITHIN_OPACITY,
                         "line": {"width": 1, "color": "rgba(255, 255, 255, 0.8)"}},
                 hovertemplate="%{text}: %{x:+.2f} %<extra>" + name + "</extra>")
     for limit in (-threshold, threshold):
@@ -224,7 +231,8 @@ def price_move_figure(asset_type: str, rows: pd.DataFrame) -> go.Figure:
     reach = max(threshold, rows["PriceChangePct"].abs().max()) * 1.15
     figure.update_layout(
         title=f"{asset_type}: change vs previous price (%), threshold ±{threshold:g} %",
-        height=STRIP_HEIGHT, legend={"orientation": "h", "y": 1.02, "yanchor": "bottom"},
+        height=TALL_STRIP_HEIGHT if len(rows) > DOTS_FOR_TALL_STRIP else STRIP_HEIGHT,
+        legend={"orientation": "h", "y": 1.02, "yanchor": "bottom"},
         xaxis={"range": [-reach, reach], "ticksuffix": " %", "zeroline": True},
         yaxis={"visible": False, "range": [-1, 1]})
     return figure
@@ -232,8 +240,9 @@ def price_move_figure(asset_type: str, rows: pd.DataFrame) -> go.Figure:
 
 def strip_spread(rows: pd.DataFrame) -> pd.Series:
     # Vertical position with no meaning, a fixed function of the Excel row (no
-    # randomness, so the chart is the same on every run): close dots stay apart.
-    return (rows["SourceRow"].astype(int) * 37 % 17 - 8) / 10
+    # randomness, so the chart is the same on every run). Multiples of the
+    # golden ratio spread evenly over [-0.8, 0.8]: close dots stay apart.
+    return (rows["SourceRow"].astype(int) * GOLDEN_RATIO % 1) * 1.6 - 0.8
 
 
 def position_labels(rows: pd.DataFrame) -> pd.Series:
@@ -256,10 +265,11 @@ def control_figure(by_control: pd.DataFrame) -> go.Figure:
     return figure
 
 
-def breach_css(moves: pd.DataFrame) -> pd.DataFrame:
-    css = pd.DataFrame("", index=moves.index, columns=moves.columns)
-    css.loc[moves["Breach"].fillna(False).astype(bool)] = tint_css(BREACH_TINT)
-    return css
+def tinted_rows(frame: pd.DataFrame, selected: pd.Series, tint: str) -> Styler:
+    # The same row tints as the report (breaches, unmatched cashflows).
+    css = pd.DataFrame("", index=frame.index, columns=frame.columns)
+    css.loc[selected] = tint_css(tint)
+    return frame.style.apply(lambda _: css, axis=None)
 
 
 def tint_css(tint: str) -> str:
@@ -274,6 +284,8 @@ def show_table(table: pd.DataFrame | Styler) -> None:
 def column_config(frame: pd.DataFrame) -> dict:
     # Same formats as the Excel report, for the columns it formats.
     config = {}
+    if "Controls" in frame.columns:  # comma-separated control IDs, up to ~65 characters
+        config["Controls"] = st.column_config.TextColumn(width="large")
     for column in frame.columns:
         excel_format = COLUMN_FORMATS.get(column)
         if excel_format == DATE_FORMAT:

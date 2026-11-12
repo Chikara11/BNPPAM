@@ -288,3 +288,22 @@ def test_summary_counts_exceptions_by_dimension(input_results):
     assert rows["Value"].sum() == len(input_results.exceptions)
     block = input_results.dimension_quality
     assert rows["Value"].tolist() == block["Exceptions"].astype(float).tolist()
+
+
+def test_market_value_is_empty_for_a_currency_outside_the_allowed_list():
+    # Invalid values never enter totals: same rule as Nominal or MarketPrice <= 0.
+    data = make_data([position(), position(Portfolio="CLO_GLOBAL_02", Currency="CHF")])
+    results = run(data, CONFIG)
+    moves = results.price_movements.set_index("Portfolio")
+    assert pd.isna(moves.loc["CLO_GLOBAL_02", "MarketValue"])
+    totals = results.summary[results.summary["Section"] == "Market value by currency"]
+    assert totals["Currency"].tolist() == ["EUR"]
+    assert totals["Value"].tolist() == [moves.loc["CLO_EURO_01", "MarketValue"]]
+
+
+def test_upcoming_cashflow_in_an_unknown_currency_is_listed_but_not_totalled():
+    data = make_data(cashflows=[cashflow(), cashflow(Currency="CHF", CashflowType="Principal")])
+    results = run(data, CONFIG)
+    assert results.upcoming_cashflows["Currency"].tolist() == ["EUR", "CHF"]
+    totals = results.summary[results.summary["Section"] == "Upcoming cashflows by currency"]
+    assert list(zip(totals["Currency"], totals["Value"])) == [("EUR", 75000.0)]

@@ -8,7 +8,7 @@ from typing import IO, Any
 import pandas as pd
 from openpyxl import Workbook
 from openpyxl.cell import Cell
-from openpyxl.styles import Font, PatternFill
+from openpyxl.styles import Alignment, Font, PatternFill
 from openpyxl.utils import get_column_letter
 from openpyxl.worksheet.worksheet import Worksheet
 
@@ -55,6 +55,9 @@ BREACH_TINT = "FFF2CC"  # light yellow, distinct from the severity tints
 SEVERITY_FILLS = {severity: PatternFill(fill_type="solid", start_color=tint)
                   for severity, tint in SEVERITY_TINTS.items()}
 BREACH_FILL = PatternFill(fill_type="solid", start_color=BREACH_TINT)
+UNMATCHED_TINT = SEVERITY_TINTS["Warning"]  # an unmatched cashflow is a Warning exception
+UNMATCHED_FILL = PatternFill(fill_type="solid", start_color=UNMATCHED_TINT)
+WRAPPED = Alignment(wrap_text=True, vertical="top")
 MAX_COLUMN_WIDTH = 60
 DATE_WIDTH = 10
 
@@ -73,10 +76,13 @@ def write_report(results: Results, path_or_buffer: str | Path | IO[bytes], *,
     write_executive_summary(workbook, results, generated_at)
     colour_severities(write_table(workbook, EXCEPTIONS_SHEET, results.exceptions),
                       results.exceptions)
-    highlight_breaches(write_table(workbook, PRICE_MOVEMENTS_SHEET, results.price_movements),
-                       results.price_movements)
-    write_table(workbook, CASHFLOWS_SHEET.format(days=results.config.cashflow_horizon_days),
-                results.upcoming_cashflows)
+    moves, upcoming = results.price_movements, results.upcoming_cashflows
+    highlight_rows(write_table(workbook, PRICE_MOVEMENTS_SHEET, moves),
+                   moves["Breach"].fillna(False), BREACH_FILL)
+    highlight_rows(write_table(workbook,
+                               CASHFLOWS_SHEET.format(days=results.config.cashflow_horizon_days),
+                               upcoming),
+                   ~upcoming["MatchedPosition"].astype(bool), UNMATCHED_FILL)
     write_data_quality(workbook, results)
     write_table(workbook, PARAMETERS_SHEET, parameters_table(results.config))
     workbook.save(path_or_buffer)
@@ -109,7 +115,11 @@ def write_data_quality(workbook: Workbook, results: Results) -> None:
     # on the column table; no frozen header, since the sheet has two.
     sheet = workbook.create_sheet(DATA_QUALITY_SHEET)
     write_cell(sheet, 1, 1, DIMENSION_BLOCK_TITLE).font = HEADER_FONT
-    write_frame(sheet, results.dimension_quality, 2)
+    block = results.dimension_quality
+    write_frame(sheet, block, 2)
+    controls = block.columns.get_loc("Controls") + 1
+    for row in range(3, 3 + len(block)):  # long lists of control IDs wrap in the cell
+        sheet.cell(row=row, column=controls).alignment = WRAPPED
     note_row = 2 + len(results.dimension_quality) + 1  # header on row 2, then the rows
     write_cell(sheet, note_row, 1, PLAUSIBILITY_NOTE).font = NOTE_FONT
     write_cell(sheet, note_row + 2, 1, COLUMN_BLOCK_TITLE).font = HEADER_FONT
@@ -198,12 +208,12 @@ def colour_severities(sheet: Worksheet, exceptions: pd.DataFrame) -> None:
         sheet.cell(row=row, column=column).fill = SEVERITY_FILLS[severity]
 
 
-def highlight_breaches(sheet: Worksheet, moves: pd.DataFrame) -> None:
-    # Not computable (empty Breach) is not highlighted.
-    for row, breach in enumerate(moves["Breach"].fillna(False), start=2):
-        if breach:
+def highlight_rows(sheet: Worksheet, selected: pd.Series, fill: PatternFill) -> None:
+    # selected is aligned on the table rows (header on row 1).
+    for row, chosen in enumerate(selected, start=2):
+        if chosen:
             for cell in sheet[row]:
-                cell.fill = BREACH_FILL
+                cell.fill = fill
 
 
 def fit_columns(sheet: Worksheet, skip_rows: set[int] = frozenset()) -> None:

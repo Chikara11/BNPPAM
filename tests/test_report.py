@@ -249,3 +249,17 @@ def test_report_data_quality_filter_is_on_the_column_table_without_freeze(workbo
     header_row = 3 + len(input_results.dimension_quality) + 3
     assert sheet.freeze_panes is None
     assert sheet.auto_filter.ref == f"A{header_row}:H{header_row + len(input_results.data_quality)}"
+
+
+def test_report_unmatched_cashflows_are_highlighted(workbook, input_results):
+    sheet = workbook["Cashflows 30D"]
+    unmatched = (~input_results.upcoming_cashflows["MatchedPosition"]).tolist()
+    filled = [cell_of(sheet, "ISIN", row).fill.fgColor.rgb.endswith("FFD8A8")
+              for row in range(2, sheet.max_row + 1)]
+    assert filled == unmatched and sum(filled) == 1  # A12
+
+
+def test_report_dimension_controls_wrap_in_their_cell(workbook, input_results):
+    sheet = workbook["Data Quality"]
+    rows = range(3, 3 + len(input_results.dimension_quality))
+    assert all(sheet.cell(row=row, column=2).alignment.wrap_text for row in rows)
