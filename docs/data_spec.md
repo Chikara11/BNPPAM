@@ -95,7 +95,8 @@ A security may have several rows (price history).
 | `PriceSource` | category | Yes | `Pricing Agent`, `Broker Quote`, `Evaluated Price` | `Pricing Agent` |
 
 **Rule used by the engine:** the previous price of a security is the price with
-the latest `PreviousDate` strictly before the valuation date.
+the latest `PreviousDate` strictly before the reference date (= latest
+`ValuationDate` by default).
 
 **Clean dataset:** every position has a previous price dated 7 days before the
 valuation date (`2026-11-04`); about half of the securities also have an older
@@ -144,7 +145,8 @@ below the threshold read from `config.yaml`.
 | `Amount` | float | Yes | Coupon and Principal > 0 (inflows); Fee < 0 (outflow) | `62500.00` |
 | `Status` | category | Yes | `Forecast`, `Confirmed`, `Paid` | `Forecast` |
 
-**Status coherence in the clean dataset** (reference date = valuation date):
+**Status coherence in the clean dataset** (reference date (= latest
+`ValuationDate` by default) = the single valuation date, 2026-11-11):
 
 | Status | CashflowDate (VD = valuation date) |
 |---|---|

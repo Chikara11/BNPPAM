@@ -28,6 +28,10 @@ allowed_values:
   Currency: [EUR, USD, GBP]
   CashflowType: [Coupon, Principal, Fee]
   Status: [Forecast, Confirmed, Paid]
+  Portfolio: [CLO_EURO_01, CLO_GLOBAL_02, ABS_EUROPE_03, MULTI_USD_04]
+  # An empty Rating is not checked here: it is handled by MISSING_RATING.
+  Rating: [AAA, AA, A, BBB, BB, B, CCC]
+  PriceSource: [Pricing Agent, Broker Quote, Evaluated Price]
 
 # Required columns per input file. Missing columns stop processing.
 required_columns:
@@ -41,6 +45,7 @@ keys:
   position_unique: [ValuationDate, Portfolio, ISIN]
   cashflow_unique: [Portfolio, ISIN, CashflowDate, CashflowType, Amount]
   cashflow_to_position: [Portfolio, ISIN]
+  previous_price_unique: [ISIN, PreviousDate]
 
 # Controls: on/off switch, severity (Critical | Warning | Information), label.
 controls:
@@ -95,7 +100,7 @@ controls:
   INVALID_VALUE:
     enabled: true
     severity: Warning
-    label: Value outside allowed list
+    label: Value outside allowed list or invalid date
   MISSING_VALUE:
     enabled: true
     severity: Warning

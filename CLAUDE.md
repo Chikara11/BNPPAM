@@ -60,7 +60,8 @@ duplicate keys live in `config.yaml`. Never hardcode them in the code.
 - BookValue = Nominal * BookPrice / 100.
 - PriceChange = MarketPrice - PreviousPrice.
 - PriceChangePct = PriceChange / PreviousPrice * 100.
-- Previous price = latest PreviousPrice strictly before the reference date.
+- Previous price = latest PreviousPrice strictly before the reference date
+  (= latest ValuationDate by default).
 - Price alerts use the absolute percentage movement and trigger when
   |PriceChangePct| is strictly greater than the threshold.
 - Default thresholds: 5% for CLO Debt and ABS, 15% for CLO Equity.
@@ -88,6 +89,10 @@ Detect:
 - Duplicate cashflows (key: Portfolio + ISIN + CashflowDate + CashflowType + Amount).
 - Past-dated cashflows still marked Forecast.
 - Cashflow currency different from its position currency.
+- Values outside the allowed lists of config.yaml.
+- Invalid dates: MaturityDate on or before the reference date, cashflow
+  dated after the MaturityDate of its position, PreviousDate on or after
+  the reference date.
 
 Do not classify a missing previous price as a missing current market price.
 Do not compute a price movement when the current or previous price is
@@ -98,10 +103,15 @@ The anomaly manifest expects exactly one exception per injected anomaly.
 The engine follows these rules:
 1. A position without ISIN raises only MISSING_ISIN: no other ISIN-based
    control (price history, price movement, duplicate key) runs on that row.
-2. MISSING_VALUE and INVALID_VALUE only cover fields without a dedicated
-   control (ISIN, MarketPrice, Rating, Nominal and prices have their own).
-3. An empty price or nominal is missing, not invalid: INVALID_PRICE and
-   INVALID_NOMINAL apply only to a value that is present and <= 0.
+2. Only ISIN, MarketPrice and Rating have a dedicated "missing" control
+   (MISSING_ISIN, MISSING_MARKET_PRICE, MISSING_RATING). MISSING_VALUE
+   covers every other required field, including Nominal, BookPrice and
+   PreviousPrice. INVALID_VALUE on allowed values ignores empty cells: an
+   empty cell is only ever reported by a MISSING_* control (otherwise an
+   emptied Rating would raise both MISSING_RATING and INVALID_VALUE).
+3. An empty Nominal, BookPrice or PreviousPrice is MISSING_VALUE, not
+   invalid: INVALID_NOMINAL and INVALID_PRICE apply only to a value that
+   is present and <= 0.
 4. Cashflow matching checks that Portfolio + ISIN exists in the positions;
    it never joins row by row, so a duplicated position does not duplicate
    cashflows. Reports state that a duplicated position is counted twice
@@ -112,7 +122,20 @@ The engine follows these rules:
 7. PriceChangePct = (MarketPrice - PreviousPrice) / PreviousPrice * 100,
    in this order, rounded to 6 decimals before the comparison with the
    threshold (so that exactly 5 % never triggers through a floating-point
-   residue). No movement is computed when either price is missing or <= 0.
+   residue). No movement is computed when MarketPrice or the latest
+   PreviousPrice is missing or <= 0 (no fallback to an older price).
+8. INVALID_PRICE covers MarketPrice, BookPrice and PreviousPrice <= 0:
+   one exception per invalid field, with the field named in the Field
+   column of the exception.
+9. Invalid dates raise INVALID_VALUE:
+   - MaturityDate <= reference date;
+   - CashflowDate > MaturityDate of its position. Checked only on
+     cashflows that match a position (Portfolio + ISIN): an unmatched
+     cashflow has no maturity to compare with and raises only
+     UNMATCHED_CASHFLOW, as in rule 6;
+   - PreviousDate >= reference date. Checked only on prices of securities
+     held in positions: prices of securities not held are ignored by the
+     engine (docs/data_spec.md section 2).
 
 ## Severity (defaults, configurable)
 Critical:
@@ -126,6 +149,8 @@ Warning:
 - Missing expected rating.
 - Unmatched or duplicate cashflow.
 - Past-dated Forecast cashflow.
+- Other required value missing (MISSING_VALUE).
+- Value outside an allowed list, or invalid date (INVALID_VALUE).
 
 Information:
 - New security without previous price history.
@@ -143,7 +168,7 @@ Information:
 - Separate modules: loading, validation, business rules, reporting, UI.
 - One rule = one function returning exceptions in a common format:
   Severity, ControlID, AnomalyType, Source, Portfolio, ISIN, SecurityName,
-  ObservedValue, Comment.
+  Field, ObservedValue, Comment.
 - Keep calculations and exception detection deterministic.
 - Readable code over clever code: short functions, explicit names, no unnecessary classes.
 
