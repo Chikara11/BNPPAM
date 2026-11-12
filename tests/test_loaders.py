@@ -2,6 +2,7 @@ import datetime
 import importlib.util
 import io
 import re
+import zipfile
 from pathlib import Path
 
 import openpyxl
@@ -164,6 +165,29 @@ def test_unreadable_file_names_the_file(tmp_path):
     paths = write_inputs(tmp_path)
     paths["cashflows"].write_text("not an excel file", encoding="utf-8")
     with pytest.raises(InputSchemaError, match="cashflows"):
+        load(paths)
+
+
+@pytest.mark.parametrize("content", [
+    bytes.fromhex("D0CF11E0A1B11AE1") + bytes(504),  # .xls or password-protected .xlsx
+    b"ISIN,PreviousDate\nSYN000000001,2026-11-04\n",  # .csv renamed .xlsx
+])
+def test_xls_csv_or_password_protected_file_gets_a_plain_message(tmp_path, content):
+    # #7: an .xls raised ImportError (python-calamine), a .csv a pandas engine message.
+    paths = write_inputs(tmp_path)
+    paths["previous_prices"].write_bytes(content)
+    with pytest.raises(InputSchemaError, match="previous_prices .* is not an .xlsx workbook: "
+                                               "it may be an .xls or .csv file, or "
+                                               "password-protected"):
+        load(paths)
+
+
+def test_zip_archive_that_is_not_a_workbook_gets_a_plain_message(tmp_path):
+    # #7: openpyxl raised a KeyError on a zip without [Content_Types].xml.
+    paths = write_inputs(tmp_path)
+    with zipfile.ZipFile(paths["cashflows"], "w") as archive:
+        archive.writestr("notes.txt", "not a workbook")
+    with pytest.raises(InputSchemaError, match="cashflows .* is damaged or is not an Excel"):
         load(paths)
 
 

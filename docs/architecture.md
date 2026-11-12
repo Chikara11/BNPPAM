@@ -132,7 +132,9 @@ config.yaml ──► config.load_config() ──► Config ────┤
 - Validates on load: every control has `enabled`, `severity`, `label`,
   `dimension` (one of the `dimensions` list, which has no repeat);
   severities are Critical / Warning / Information; thresholds exist for each
-  asset type; every required column has a type in `COLUMN_TYPES` (the
+  asset type; `cashflow_horizon_days` is a whole number from 0 to
+  `MAX_HORIZON_DAYS` (3650, `config.py`: a larger value would overflow the
+  date arithmetic); every required column has a type in `COLUMN_TYPES` (the
   column types of `docs/data_spec.md`, defined in `config.py` and used by
   the loader), so a new required column can never skip type checking.
   Stops with a clear `ConfigError` otherwise.
@@ -170,6 +172,10 @@ config.yaml ──► config.load_config() ──► Config ────┤
     normalisation: the loader does **not** trim. A value with leading or
     trailing spaces is kept as is, and reported by INVALID_VALUE if it is
     not an allowed value;
+  - only `.xlsx` is read, with openpyxl: a file that does not start with
+    the zip signature (an `.xls`, a `.csv`, a password-protected workbook)
+    raises `InputSchemaError` saying so, and a damaged or non-workbook zip
+    raises `InputSchemaError` too, never a pandas or openpyxl traceback;
   - the workbook must have exactly one visible sheet: a second or hidden
     sheet raises `InputSchemaError` naming the sheets (pandas would read a
     hidden first sheet);
@@ -356,7 +362,8 @@ the price change formula and its rounding are those of `CLAUDE.md`.
   are there); thresholds per asset type, horizon and one
   checkbox per control, applied through `with_overrides` (every value is
   passed and re-validated); "Reset to config.yaml" clears them. No
-  reference-date override. The engine re-runs on every change.
+  reference-date override. The horizon input is capped at
+  `MAX_HORIZON_DAYS`. The engine re-runs on every change.
 - Tabs: Summary (severity metrics, exceptions-by-control chart, every
   `Results.summary` section), Exceptions (filters by severity, control, portfolio;
   they only hide rows), Price Movements, Cashflows {N}D, Data Quality
@@ -375,12 +382,17 @@ the price change formula and its rounding are those of `CLAUDE.md`.
   tints and the column formats come from `report.py` (`SEVERITY_TINTS`,
   `BREACH_TINT`, `UNMATCHED_TINT`, `COLUMN_FORMATS`), translated to
   Streamlit syntax. The Controls column of the dimension block is wide.
+  A table with more cells than pandas can style
+  (`styler.render.max_elements`, 262,144 by default) is shown without
+  tints, with a caption saying so.
 - Download button: the Excel report built by `report.write_report` with the
   current sidebar settings.
 - Config, input and registry errors are shown with `st.error`, never a
   traceback.
 - No business logic in `app.py`: every number comes from `Results`.
-  Caching with `st.cache_data` on loading only (key = the file bytes).
+  Caching with `st.cache_data` on loading only (key = the file bytes,
+  at most 10 entries, so uploads do not fill the memory of a shared
+  server).
 
 ---
 

@@ -3,8 +3,10 @@ import json
 import re
 
 import pandas as pd
+import pytest
 from streamlit.testing.v1 import AppTest
 
+from dq.config import MAX_HORIZON_DAYS
 from dq.report import (BREACH_TINT, COLUMN_BLOCK_TITLE, DIMENSION_BLOCK_TITLE, PLAUSIBILITY_NOTE,
                        SEVERITY_TINTS, UNMATCHED_TINT)
 from helpers import REPO_ROOT
@@ -109,10 +111,31 @@ def test_app_upload_with_a_missing_column_shows_a_readable_error():
     assert "missing required column(s): Rating" in app.error[0].value
 
 
-def test_app_unreadable_upload_shows_a_readable_error():
-    app = upload(started(), {**sample_files(), "cashflows": b"not an excel file"})
+# An .xls file and a password-protected .xlsx both start with the OLE2 signature.
+OLE2_FILE = bytes.fromhex("D0CF11E0A1B11AE1") + bytes(504)
+
+
+@pytest.mark.parametrize("content", [b"not an excel file", OLE2_FILE])
+def test_app_unreadable_upload_shows_a_readable_error(content):
+    # #7: an .xls or password-protected file raised an ImportError traceback.
+    app = upload(started(), {**sample_files(), "cashflows": content})
     assert not app.exception
-    assert "cannot be read as an Excel workbook" in app.error[0].value
+    assert "is not an .xlsx workbook" in app.error[0].value
+
+
+def test_app_tables_above_the_styling_limit_are_shown_plain():
+    # #8: pandas refuses to style more cells than its limit (262,144 by
+    # default); a low limit reproduces it on the sample.
+    with pd.option_context("styler.render.max_elements", 100):
+        app = started()
+    assert not app.exception
+    assert "shown without colours" in " ".join(caption.value for caption in app.tabs[1].caption)
+    assert len(exceptions_shown(app)) == 15
+
+
+def test_app_horizon_is_capped_at_the_config_maximum():
+    # #9: a huge horizon overflowed the date arithmetic.
+    assert started().number_input(key="setting_horizon").proto.max == MAX_HORIZON_DAYS
 
 
 def chart_specs(app: AppTest) -> dict[str, dict]:

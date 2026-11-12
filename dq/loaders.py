@@ -16,6 +16,8 @@ from dq.schema import PARSE_ISSUE_COLUMNS, empty_frame
 
 Source = str | Path | IO[bytes]
 
+XLSX_SIGNATURE = b"PK\x03\x04"  # an .xlsx file is a zip archive
+
 
 class InputSchemaError(Exception):
     pass
@@ -50,17 +52,20 @@ def load_inputs(positions: Source, previous_prices: Source, cashflows: Source,
 
 def read_raw(source: Source, file: str) -> pd.DataFrame:
     name = source_name(source, file)
-    if hasattr(source, "seek"):
-        source.seek(0)  # an uploaded file may already have been read once
+    check_xlsx_signature(source, file, name)
     try:
-        with pd.ExcelFile(source) as workbook:
+        # openpyxl only: pandas would pick another engine (not installed) for
+        # an .xls file and fail with an ImportError
+        with pd.ExcelFile(source, engine="openpyxl") as workbook:
             check_single_visible_sheet(workbook, file, name)
             # header=None: the header row is read as data so that a duplicated
             # column name can be detected before pandas renames it "X.1"
             sheet = pd.read_excel(workbook, sheet_name=0, header=None, dtype=object)
-    except (OSError, ValueError, zipfile.BadZipFile, InvalidFileException) as error:
-        raise InputSchemaError(f"The {file} file ({name}) cannot be read as an Excel "
-                               f"workbook: {error}") from error
+    # KeyError: a zip archive that is not a workbook (no [Content_Types].xml)
+    except (OSError, ValueError, KeyError, zipfile.BadZipFile, InvalidFileException) as error:
+        raise InputSchemaError(f"The {file} file ({name}) cannot be read: it is damaged or "
+                               f"is not an Excel workbook. Save it again as .xlsx from "
+                               f"Excel.") from error
     if sheet.empty:
         raise InputSchemaError(f"The {file} file ({name}) is empty: no header row.")
     header = [header_name(value, position) for position, value in enumerate(sheet.iloc[0])]
@@ -72,6 +77,30 @@ def read_raw(source: Source, file: str) -> pd.DataFrame:
     data.columns = header
     data["SourceRow"] = pd.array(data.index + 1, dtype="Int64")  # header = Excel row 1
     return data.reset_index(drop=True)
+
+
+def check_xlsx_signature(source: Source, file: str, name: str) -> None:
+    # An .xls, a .csv or a password-protected workbook (an encrypted container,
+    # not a zip) does not start like an .xlsx file: say so in plain words.
+    try:
+        start = first_bytes(source, len(XLSX_SIGNATURE))
+    except OSError as error:
+        raise InputSchemaError(f"The {file} file ({name}) cannot be opened: "
+                               f"{error.strerror or error}.") from error
+    if start != XLSX_SIGNATURE:
+        raise InputSchemaError(f"The {file} file ({name}) is not an .xlsx workbook: it may be "
+                               f"an .xls or .csv file, or password-protected. Save it as .xlsx "
+                               f"without a password.")
+
+
+def first_bytes(source: Source, count: int) -> bytes:
+    if isinstance(source, (str, Path)):
+        with open(source, "rb") as handle:
+            return handle.read(count)
+    source.seek(0)  # an uploaded file may already have been read once
+    start = source.read(count)
+    source.seek(0)
+    return start
 
 
 def check_single_visible_sheet(workbook: pd.ExcelFile, file: str, name: str) -> None:

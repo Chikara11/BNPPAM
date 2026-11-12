@@ -14,6 +14,9 @@ import yaml
 
 SEVERITIES = ("Critical", "Warning", "Information")
 INPUT_FILES = ("positions", "previous_prices", "cashflows")
+# Upper bound of cashflow_horizon_days (10 years): a typo such as 1000000000
+# days would overflow the date arithmetic.
+MAX_HORIZON_DAYS = 3650
 
 # Column types of docs/data_spec.md, used by the loader. It lives here so that
 # the config can check that every required column has a type. Columns not
@@ -169,8 +172,10 @@ def check_reference_date(raw: dict) -> list[str]:
 
 def check_horizon(raw: dict) -> list[str]:
     value = raw["cashflow_horizon_days"]
-    if isinstance(value, bool) or not isinstance(value, int) or value < 0:
-        return [f"cashflow_horizon_days must be a whole number >= 0 (got {value!r})."]
+    if (isinstance(value, bool) or not isinstance(value, int)
+            or not 0 <= value <= MAX_HORIZON_DAYS):
+        return [f"cashflow_horizon_days must be a whole number from 0 to {MAX_HORIZON_DAYS} "
+                f"(got {value!r})."]
     return []
 
 

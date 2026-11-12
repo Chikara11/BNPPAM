@@ -80,6 +80,19 @@ def test_with_overrides_rejects_unknown_keys(overrides, named):
         with_overrides(load_config(CONFIG_PATH), overrides)
 
 
+@pytest.mark.parametrize("days, accepted", [(0, True), (3650, True), (3651, False),
+                                           (1_000_000_000, False)])
+def test_horizon_is_limited_to_3650_days(days, accepted):
+    # #9: a typo such as 1000000000 days overflowed the date arithmetic.
+    config = load_config(CONFIG_PATH)
+    if accepted:
+        changed = with_overrides(config, {"cashflow_horizon_days": days})
+        assert changed.cashflow_horizon_days == days
+    else:
+        with pytest.raises(ConfigError, match="from 0 to 3650"):
+            with_overrides(config, {"cashflow_horizon_days": days})
+
+
 def test_with_overrides_revalidates():
     with pytest.raises(ConfigError, match="cashflow_horizon_days"):
         with_overrides(load_config(CONFIG_PATH), {"cashflow_horizon_days": -1})

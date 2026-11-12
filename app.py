@@ -10,7 +10,7 @@ from pandas.io.formats.style import Styler
 
 from dq import (Config, ConfigError, InputData, InputSchemaError, RegistryError, Results,
                 load_config, load_inputs, run, with_overrides)
-from dq.config import INPUT_FILES, SEVERITIES
+from dq.config import INPUT_FILES, MAX_HORIZON_DAYS, SEVERITIES
 from dq.report import (AMOUNT_FORMAT, BREACH_TINT, COLUMN_BLOCK_TITLE, COLUMN_FORMATS,
                        DATE_FORMAT, DIMENSION_BLOCK_TITLE, PLAUSIBILITY_NOTE, PRICE_FORMAT,
                        SEVERITY_TINTS, UNMATCHED_TINT, write_report)
@@ -81,7 +81,8 @@ def input_data() -> InputData | None:
     return load_files(files["positions"], files["previous_prices"], files["cashflows"])
 
 
-@st.cache_data(show_spinner="Reading the input files...")
+# max_entries: every upload is a new key; bounds the memory of a shared server.
+@st.cache_data(show_spinner="Reading the input files...", max_entries=10)
 def load_files(positions: bytes, previous_prices: bytes, cashflows: bytes) -> InputData:
     # Cached on the file bytes. The required columns come from config.yaml,
     # which the sidebar never changes, so the config is not part of the key.
@@ -98,6 +99,7 @@ def sidebar_overrides(config: Config) -> dict:
                                                    step=0.5, key=f"{SETTING_KEY}{asset_type}")
                   for asset_type, default in config.price_move_thresholds_pct.items()}
     horizon = sidebar.number_input("Cashflow horizon (days)", min_value=0,
+                                   max_value=MAX_HORIZON_DAYS,
                                    value=config.cashflow_horizon_days, step=1,
                                    key=f"{SETTING_KEY}horizon")
     with sidebar.expander("Controls"):
@@ -278,6 +280,12 @@ def tint_css(tint: str) -> str:
 
 def show_table(table: pd.DataFrame | Styler) -> None:
     frame = table.data if isinstance(table, Styler) else table
+    limit = pd.get_option("styler.render.max_elements")
+    if isinstance(table, Styler) and frame.size > limit:
+        # pandas refuses to style more cells than its limit: show the data plain
+        st.caption(f"{len(frame):,} rows: shown without colours (more than {limit:,} "
+                   f"cells to colour).")
+        table = frame
     st.dataframe(table, hide_index=True, column_config=column_config(frame))
 
 
