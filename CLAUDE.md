@@ -27,7 +27,7 @@ This is a synthetic demonstration, not a production financial system.
 
 ## Data policy
 - All records are fictional and generated locally.
-- Never use real portfolio, market or client data or any confidential information.
+- Never use real portfolio, market or client data, or any confidential information.
 - Synthetic identifiers: 12 characters, `SYN` + 9 digits (e.g. SYN000000001),
   same length as an ISIN but clearly fictional.
 - Two datasets, one design (docs/data_spec.md "Datasets"), same file
