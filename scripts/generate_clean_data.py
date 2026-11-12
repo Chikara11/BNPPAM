@@ -216,13 +216,13 @@ def make_security_name(asset_type: str, rating, index: int, rng: np.random.Gener
     return f"{word} CLO {vintage}-{series} {tranche}"
 
 
-def build_one_security(index: int, portfolio: str, asset_type: str, currency: str,
-                       rng: np.random.Generator) -> dict:
+def build_one_security(index: int, isin_number: int, portfolio: str, asset_type: str,
+                       currency: str, rng: np.random.Generator) -> dict:
     rating = draw_rating(asset_type, rng)
     previous_price = draw_previous_price(asset_type, rating, rng)
     rate_low, rate_high = COUPON_RATE_RANGES[asset_type]
     return {
-        "ISIN": make_isin(index + 1),
+        "ISIN": make_isin(isin_number),
         "HomePortfolio": portfolio,
         "SecurityName": make_security_name(asset_type, rating, index, rng),
         "AssetType": asset_type,
@@ -237,12 +237,15 @@ def build_one_security(index: int, portfolio: str, asset_type: str, currency: st
     }
 
 
-def build_securities(rng: np.random.Generator) -> pd.DataFrame:
+def build_securities(rng: np.random.Generator, layout: list = SECURITY_LAYOUT,
+                     first_isin_number: int = 1) -> pd.DataFrame:
     """One row per distinct security, with its security-level attributes."""
     rows = []
-    for portfolio, asset_type, currency, count in SECURITY_LAYOUT:
+    for portfolio, asset_type, currency, count in layout:
         for _ in range(count):
-            rows.append(build_one_security(len(rows), portfolio, asset_type, currency, rng))
+            index = len(rows)
+            rows.append(build_one_security(index, first_isin_number + index, portfolio,
+                                           asset_type, currency, rng))
     return pd.DataFrame(rows)
 
 
@@ -258,13 +261,13 @@ def draw_book_price(market_price: float, rng: np.random.Generator) -> float:
     return round(market_price + float(rng.uniform(-BOOK_PRICE_SPREAD, BOOK_PRICE_SPREAD)), 2)
 
 
-def shared_isins(securities: pd.DataFrame) -> list:
+def shared_isins(securities: pd.DataFrame, count: int) -> list:
     candidates = securities[
         (securities["HomePortfolio"] == SHARED_FROM_PORTFOLIO)
         & (securities["AssetType"] == SHARED_ASSET_TYPE)
         & (securities["Currency"] == SHARED_CURRENCY)
     ]
-    return candidates["ISIN"].head(SHARED_SECURITY_COUNT).tolist()
+    return candidates["ISIN"].head(count).tolist()
 
 
 def position_row(security: pd.Series, portfolio: str, rng: np.random.Generator) -> dict:
@@ -283,11 +286,11 @@ def position_row(security: pd.Series, portfolio: str, rng: np.random.Generator) 
     }
 
 
-def build_positions(securities: pd.DataFrame, rng: np.random.Generator,
-                    columns: list) -> pd.DataFrame:
+def build_positions(securities: pd.DataFrame, rng: np.random.Generator, columns: list,
+                    shared_count: int = SHARED_SECURITY_COUNT) -> pd.DataFrame:
     rows = [position_row(security, security["HomePortfolio"], rng)
             for _, security in securities.iterrows()]
-    for isin in shared_isins(securities):
+    for isin in shared_isins(securities, shared_count):
         security = securities.loc[securities["ISIN"] == isin].iloc[0]
         rows.append(position_row(security, SHARED_TO_PORTFOLIO, rng))
     positions = pd.DataFrame(rows)
@@ -701,29 +704,37 @@ def print_summary(positions: pd.DataFrame, previous_prices: pd.DataFrame,
 # -----------------------------------------------------------------------------
 # Main
 # -----------------------------------------------------------------------------
-def main() -> None:
-    config = load_config(CONFIG_PATH)
+def build_clean_files(rng: np.random.Generator, config: dict, layout: list = SECURITY_LAYOUT,
+                      first_isin_number: int = 1,
+                      shared_count: int = SHARED_SECURITY_COUNT) -> dict:
+    """The 3 clean files in memory; every invariant is checked before returning."""
     columns = config["required_columns"]
-    rng = np.random.default_rng(SEED)
-
-    securities = build_securities(rng)
-    positions = build_positions(securities, rng, columns["positions"])
+    securities = build_securities(rng, layout, first_isin_number)
+    positions = build_positions(securities, rng, columns["positions"], shared_count)
     previous_prices = build_previous_prices(securities, rng, columns["previous_prices"],
                                             config["allowed_values"]["PriceSource"])
     cashflows = build_cashflows(positions, securities, rng, columns["cashflows"])
-
     run_all_checks(positions, previous_prices, cashflows, config)
     check_cashflow_coverage(cashflows, config)
+    return {"positions": positions, "previous_prices": previous_prices, "cashflows": cashflows}
 
-    OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
-    files = {"positions": positions, "previous_prices": previous_prices, "cashflows": cashflows}
+
+def write_and_verify(files: dict, folder: Path, config: dict) -> tuple:
+    """Save the files, read them back and check the invariants again, as the engine will
+    see them. Returns the saved files and the invariant report."""
+    folder.mkdir(parents=True, exist_ok=True)
     for name, data in files.items():
-        save_workbook(data, OUTPUT_DIR / f"{name}.xlsx", name)
-
-    # Re-read the saved files and check them again, as the engine will see them.
-    saved = {name: read_workbook(OUTPUT_DIR / f"{name}.xlsx", name) for name in files}
+        save_workbook(data, folder / f"{name}.xlsx", name)
+    saved = {name: read_workbook(folder / f"{name}.xlsx", name) for name in files}
     results = run_all_checks(saved["positions"], saved["previous_prices"],
                              saved["cashflows"], config)
+    return saved, results
+
+
+def main() -> None:
+    config = load_config(CONFIG_PATH)
+    files = build_clean_files(np.random.default_rng(SEED), config)
+    saved, results = write_and_verify(files, OUTPUT_DIR, config)
 
     print_summary(saved["positions"], saved["previous_prices"], saved["cashflows"], config)
     print("\n--- Invariants (checked before saving and on the saved files) ---")

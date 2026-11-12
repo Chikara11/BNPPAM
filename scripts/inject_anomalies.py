@@ -98,7 +98,10 @@ def insert_after(data: pd.DataFrame, label, row: dict) -> pd.DataFrame:
 def find_position(positions: pd.DataFrame, case_id: str, portfolio: str, isin: str,
                   asset_type: str, currency: str, ratings=None):
     """Index label of the single matching position; checks its attributes."""
-    require(isin not in SHARED_ISINS, case_id, f"{isin} is a shared ISIN and must not be used")
+    # A security held in several portfolios is never used: a case on it would
+    # change several positions.
+    held_in = (positions["ISIN"] == isin).sum()
+    require(held_in <= 1, case_id, f"{isin} is held in {held_in} portfolios and must not be used")
     match = positions[(positions["Portfolio"] == portfolio) & (positions["ISIN"] == isin)]
     require(len(match) == 1, case_id, f"expected 1 position {portfolio}/{isin}, found {len(match)}")
     row = match.iloc[0]
@@ -200,20 +203,33 @@ def inject_price_case(data: dict, config: dict, case_id: str, portfolio: str, is
 # -----------------------------------------------------------------------------
 # Anomaly cases (15): one function per case, exactly one expected exception
 # -----------------------------------------------------------------------------
-def inject_a01(data: dict, config: dict) -> dict:
-    portfolio, isin = "CLO_EURO_01", "SYN000000007"
-    original = set_position_field(data, "A01", portfolio, isin, "CLO Debt", "EUR", "ISIN", None)
+def empty_isin(data: dict, case_id: str, portfolio: str, isin: str, asset_type: str,
+               currency: str) -> tuple:
+    """Empty the ISIN of one position and delete its previous prices and cashflows,
+    so that they do not become unmatched (exception rule 1: only MISSING_ISIN).
+
+    Returns (original ISIN, number of prices deleted, number of cashflows deleted).
+    """
+    original = set_position_field(data, case_id, portfolio, isin, asset_type, currency,
+                                  "ISIN", None)
     prices = data["previous_prices"]
     deleted_prices = prices["ISIN"] == isin
     data["previous_prices"] = prices[~deleted_prices].reset_index(drop=True)
     cashflows = data["cashflows"]
     deleted_flows = (cashflows["Portfolio"] == portfolio) & (cashflows["ISIN"] == isin)
     data["cashflows"] = cashflows[~deleted_flows].reset_index(drop=True)
+    return original, int(deleted_prices.sum()), int(deleted_flows.sum())
+
+
+def inject_a01(data: dict, config: dict) -> dict:
+    portfolio, isin = "CLO_EURO_01", "SYN000000007"
+    original, deleted_prices, deleted_flows = empty_isin(data, "A01", portfolio, isin,
+                                                         "CLO Debt", "EUR")
     return manifest_row(
         config, "A01", "positions", portfolio, "CLO Debt", "EUR", "", "ISIN", original, None,
         "MISSING_ISIN", "Critical", 1,
         f"ISIN emptied on a CLO Debt position (clean ISIN {isin}). Its "
-        f"{deleted_prices.sum()} previous price(s) and {deleted_flows.sum()} cashflow(s) were "
+        f"{deleted_prices} previous price(s) and {deleted_flows} cashflow(s) were "
         "deleted so that they do not become unmatched. Exception rule 1: only MISSING_ISIN, "
         "no other ISIN-based control on this row.",
         [("positions", portfolio, isin), ("previous_prices", None, isin),
@@ -493,11 +509,13 @@ CASES = [
 # Checks on the cases
 # -----------------------------------------------------------------------------
 def check_one_case_per_security(manifest: pd.DataFrame) -> None:
+    # A case with two expected controls has two manifest rows with the same
+    # AnomalyID: it counts once.
     cases_by_isin = {}
     for _, row in manifest.iterrows():
         for isin in {isin for _, _, isin in row["_touches"]}:
-            cases_by_isin.setdefault(isin, []).append(row["AnomalyID"])
-    repeated = {isin: cases for isin, cases in cases_by_isin.items() if len(cases) > 1}
+            cases_by_isin.setdefault(isin, set()).add(row["AnomalyID"])
+    repeated = {isin: sorted(cases) for isin, cases in cases_by_isin.items() if len(cases) > 1}
     if repeated:
         raise InjectionError(f"Securities used by more than one case: {repeated}")
     shared = sorted(set(cases_by_isin) & SHARED_ISINS)
@@ -551,8 +569,8 @@ def row_keys(file: str, row) -> set:
 
 def attribute(file: str, clean_row, input_row, manifest: pd.DataFrame) -> str:
     keys = row_keys(file, clean_row) | row_keys(file, input_row)
-    owners = [row["AnomalyID"] for _, row in manifest.iterrows()
-              if keys & set(row["_touches"])]
+    owners = sorted({row["AnomalyID"] for _, row in manifest.iterrows()
+                     if keys & set(row["_touches"])})
     if len(owners) != 1:
         shown = clean_row if clean_row is not None else input_row
         raise InjectionError(f"Difference in {file} not owned by exactly one case "
