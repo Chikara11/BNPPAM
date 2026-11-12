@@ -65,6 +65,9 @@ securitised-credit-dq/
 │   └── run_report.py         # CLI: load -> run -> write report
 ├── tests/
 │   ├── conftest.py
+│   ├── test_config.py
+│   ├── test_loaders.py
+│   ├── test_engine.py
 │   ├── test_manifest.py
 │   ├── test_controls.py
 │   └── test_boundaries.py
@@ -108,8 +111,13 @@ config.yaml ──► config.load_config() ──► Config ────┤
 ## 4. Modules and contracts
 
 ### 4.1 `config.py`
-- `load_config(path: str | Path) -> Config`
-- `Config` is a frozen dataclass mirroring `config.yaml`.
+- `load_config(path: str | Path) -> Config`: reads the YAML
+  (`yaml.safe_load`) and calls `config_from_dict`.
+- `config_from_dict(raw: dict) -> Config`: validates a deep copy of `raw`
+  and builds the `Config` (also used by tests to build a reduced config).
+- `Config` is a frozen dataclass mirroring `config.yaml`; its mappings are
+  read-only and it keeps the raw dict (`raw`) for `with_overrides` and the
+  Parameters sheet.
 - Validates on load: every control has `enabled`, `severity`, `label`;
   severities are Critical / Warning / Information; thresholds exist for each
   asset type. Stops with a clear `ConfigError` otherwise.
@@ -117,42 +125,72 @@ config.yaml ──► config.load_config() ──► Config ────┤
   dict `overrides` (e.g. `{"price_move_thresholds_pct": {"ABS": 4.0}}`) into a
   deep copy of the raw config, re-validates it and returns a new `Config`
   (used by the app sidebar and by tests). The original is never mutated, and
-  controls never mutate the config.
+  controls never mutate the config. A key in `overrides` that does not exist
+  in the config raises `ConfigError` (a typo is never silently ignored).
+  Dicts are merged; lists and scalars are replaced.
 
 ### 4.2 `loaders.py`
-- `load_inputs(positions, previous_prices, cashflows) -> InputData`
-  Each argument is a path or a file-like object (Streamlit upload).
-- `InputData` is a dataclass with three DataFrames and `parse_issues`, a
-  DataFrame with columns file, SourceRow, column, raw value.
+- `load_inputs(positions, previous_prices, cashflows, config) -> InputData`
+  Each file argument is a path or a file-like object (Streamlit upload);
+  `config` gives the required columns.
+- `InputData` is a frozen dataclass with three DataFrames and
+  `parse_issues`, a DataFrame defined in `docs/output_spec.md` section 0
+  (File, SourceRow, Column, RawValue).
 - Rules:
-  - every column is first read as `object` (raw values), then converted:
-    text columns stay `object` (forced explicitly; pandas 3 would otherwise
-    infer its `str` dtype), number columns become `float64` (Nominal
-    included), date columns become `datetime64` normalised to midnight, in
-    the unit pandas returns (`[us]` with the pinned version);
-  - conversion uses `errors="coerce"`. A non-empty value that fails the
-    conversion becomes missing in the DataFrame and is recorded in
-    `parse_issues` with its raw value. It is reported by INVALID_VALUE (raw
-    text as ObservedValue), never by a MISSING_* control;
+  - every column is first read as `object` (raw cell values), then
+    converted: text columns stay `object` (forced explicitly; pandas 3 would
+    otherwise infer its `str` dtype), number columns become `float64`
+    (Nominal included), date columns become `datetime64` normalised to
+    midnight, in the unit pandas returns (`[us]` with the pinned version);
+  - conversion is strict by cell type (no `pd.to_numeric` /
+    `pd.to_datetime` coercion of text): text columns accept only text
+    cells, number columns only numeric cells (not booleans), date columns
+    only date cells. Any other non-empty value (e.g. `"98.5"` stored as
+    text, `TRUE`, a number in a date column, a number in a text column)
+    becomes missing in the DataFrame and is recorded in `parse_issues` with
+    its raw value. It is reported by INVALID_VALUE (raw text as
+    ObservedValue), never by a MISSING_* control;
   - documented normalisation: empty strings and whitespace-only cells
     become missing (`NaN` / `NaT` / `None`), never `""`. This is the only
     normalisation: the loader does **not** trim. A value with leading or
     trailing spaces is kept as is, and reported by INVALID_VALUE if it is
     not an allowed value;
   - required columns from `config.yaml`; a missing column raises
-    `InputSchemaError` with the file and column name;
-  - adds `SourceRow` (int): the Excel row number (header = row 1, first data
-    row = 2), so every exception points to a real row.
+    `InputSchemaError` with the file and column name. A column name that
+    appears twice in the header also raises `InputSchemaError` naming it
+    (checked on the raw header, before pandas renames it `X.1`);
+  - adds `SourceRow` (Int64): the Excel row number (header = row 1, first
+    data row = 2), so every exception points to a real row. Empty rows in
+    the middle of a sheet are kept, so the numbering stays right.
+- Helpers used by the controls:
+  - `truly_missing(data, file, column) -> pd.Series` (bool): the cell is
+    empty and has no parse issue (exception rule 10);
+  - `empty_rows(data, file) -> pd.Series` (bool): every column of the row
+    is empty (exception rule 11).
 - The loader does not validate values. That is the controls' job.
 
 ### 4.3 `context.py`
-- `Context` (frozen dataclass): `config`, `reference_date`, `horizon_end`.
+- `Context` (frozen dataclass): `config`, `reference_date`, `horizon_end`,
+  `ignored_position_rows`.
 - `build_context(data, config) -> Context`: reference date = `config` value
-  if set, else latest `ValuationDate` in positions.
+  if set, else latest valid `ValuationDate` in positions. No valid
+  `ValuationDate` and no config date raises `InputSchemaError` (no reference
+  date to work with: file-level error). A config date with no position at
+  that date is not an error: 0 positions, all rows ignored, shown in the
+  summary.
+- `ignored_position_rows`: position rows with a valid `ValuationDate`
+  different from the reference date.
+- `positions_at_reference_date(data, ctx) -> InputData`: keeps the
+  positions dated at the reference date **and** those whose
+  `ValuationDate` is empty or unparseable (so that MISSING_VALUE /
+  INVALID_VALUE report them instead of dropping them silently).
 
 ### 4.4 `exceptions.py`
-- `make_exceptions(rows, control_id, ctx, file, field) -> pd.DataFrame`
-  builds rows in the common exception format: the `CLAUDE.md` list with
+- `make_exceptions(rows, control_id, ctx, file, field, *, observed=None,
+  comment) -> pd.DataFrame` builds one exception per row of `rows` (a
+  subset of an input DataFrame); `observed` (Series aligned on `rows`, or
+  None = empty) gives ObservedValue and `comment` (text or Series) the
+  Comment. Rows follow the common exception format: the `CLAUDE.md` list with
   `ExceptionID` first and `SourceRow` last. Names, order and dtypes are
   defined once, in `docs/output_spec.md`. Severity and label always come
   from `ctx.config`. `Source` is the input file of the row (`positions`,
@@ -164,7 +202,8 @@ config.yaml ──► config.load_config() ──► Config ────┤
 - Price movement exceptions are raised on the position row:
   `Source = positions`, `Field = MarketPrice`.
 - `empty_exceptions() -> pd.DataFrame` returns an empty frame with the right
-  columns and dtypes.
+  columns and dtypes. It is defined in `schema.py` (with the other output
+  schemas) and used by `exceptions.py` and the controls.
 - `ExceptionID` is assigned once, by the engine, after sorting:
   `EXC-0001`, `EXC-0002`, ... (zero-padded to 4 digits).
 
@@ -232,11 +271,13 @@ the price change formula and its rounding are those of `CLAUDE.md`.
 
 ### 4.7 `engine.py`
 - `run(data: InputData, config: Config) -> Results` is the only entry point.
-- Steps: build context → keep only the positions with
-  `ValuationDate == reference date` (previous prices and cashflows are not
-  filtered; the number of position rows ignored is reported in the summary,
-  never silently) → run enabled controls in the order of `config.yaml` →
-  concatenate → sort (Severity, ControlID, Portfolio, ISIN, SourceRow) →
+- Steps: check the registry → build context → keep only the positions with
+  `ValuationDate == reference date`, plus those with an empty or
+  unparseable `ValuationDate` (section 4.3; previous prices and cashflows
+  are not filtered; the number of position rows ignored is reported in the
+  summary, never silently) → run enabled controls in the order of
+  `config.yaml` → concatenate → sort (Severity, ControlID, Portfolio, ISIN,
+  SourceRow, Field; empty values last) →
   assign `ExceptionID` → run analytics (on the same filtered positions) →
   return `Results`.
 - Severity is sorted as an ordered categorical: Critical > Warning >
@@ -300,7 +341,14 @@ Changing a threshold or a severity = edit `config.yaml` only.
 ## 7. Testing
 
 - `conftest.py` loads the config, `data/clean/` and `data/inputs/` once per
-  session.
+  session. **Temporary**, until every control of `config.yaml` is
+  registered: the tests run on a config built from the real `config.yaml`
+  with only the registered controls, and one test checks that the real
+  config raises `RegistryError` naming the missing controls. Once the last
+  control is registered, conftest uses the real config and that test is
+  removed.
+- `test_config.py`, `test_loaders.py`, `test_engine.py`: config validation
+  and overrides, loader conversions and errors, registry / sort / IDs.
 - `test_manifest.py`: the manifest is the oracle (exact control, severity
   and count per case; total on inputs; zero on clean data). An exception
   matches a case on ControlID + Portfolio + ISIN, ignoring the manifest

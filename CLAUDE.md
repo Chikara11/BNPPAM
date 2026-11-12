@@ -142,6 +142,10 @@ The engine follows these rules:
     raises only INVALID_VALUE, with the raw text as ObservedValue. MISSING_*
     controls report only truly empty cells (empty, empty string or
     whitespace only).
+11. A fully empty row (every column of the sheet empty) is reported once,
+    by INVALID_VALUE with Field `row` and Comment `Empty row`, and is
+    excluded from every other control (otherwise it would raise one
+    MISSING_* exception per column).
 
 ## Severity (defaults, configurable)
 Critical:
