@@ -673,8 +673,8 @@ def print_section(title: str, content) -> None:
 
 
 def print_summary(positions: pd.DataFrame, previous_prices: pd.DataFrame,
-                  cashflows: pd.DataFrame, config: dict) -> None:
-    print(f"Valuation date: {VALUATION_DATE.date()}   seed: {SEED}")
+                  cashflows: pd.DataFrame, config: dict, seed: int = SEED) -> None:
+    print(f"Valuation date: {VALUATION_DATE.date()}   seed: {seed}")
     print(f"Rows: positions={len(positions)}  "
           f"(distinct ISINs={positions['ISIN'].nunique()})  "
           f"previous_prices={len(previous_prices)}  cashflows={len(cashflows)}")
