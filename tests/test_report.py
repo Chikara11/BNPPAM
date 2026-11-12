@@ -136,8 +136,7 @@ def test_report_executive_summary_shows_the_run_and_every_summary_row(workbook, 
         assert (item.Item, currency, item.Value) in rows
     sections = [name for name, currency, value in rows if name and value is None]
     assert sections == input_results.summary["Section"].unique().tolist()
-    ignored = "Position rows not at the reference date (ignored)"
-    assert (ignored, None, 0) in rows
+    assert ("Cashflows excluded from totals", None, 0) in rows
 
 
 def test_report_executive_summary_formats_amounts_and_counts(workbook):

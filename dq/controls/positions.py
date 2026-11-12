@@ -3,6 +3,7 @@ from __future__ import annotations
 import pandas as pd
 
 from dq.analytics import duplicate_candidates
+from dq.config import COLUMN_TYPES
 from dq.context import Context
 from dq.controls.common import evaluated_rows
 from dq.exceptions import make_duplicate_exceptions, make_exceptions
@@ -34,8 +35,16 @@ def check_duplicate_position(data: InputData, ctx: Context) -> pd.DataFrame:
     candidates = duplicate_candidates(data, "positions", ctx)
     return make_duplicate_exceptions(
         data.positions[candidates], ctx.config.keys["position_unique"], "DUPLICATE_POSITION",
-        ctx, "positions", note="The position is counted twice in totals.",
+        ctx, "positions", note=describe_position_differences,
     )
+
+
+def describe_position_differences(group: pd.DataFrame) -> str:
+    # Only the first row is controlled (rule 12): name what the others change.
+    differing = [column for column in COLUMN_TYPES["positions"]
+                 if group[column].nunique(dropna=False) > 1]
+    rows = f"Rows differ on {', '.join(differing)}." if differing else "Rows are identical."
+    return f"The position is counted twice in totals. {rows}"
 
 
 def check_missing_market_price(data: InputData, ctx: Context) -> pd.DataFrame:

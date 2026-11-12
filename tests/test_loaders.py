@@ -1,6 +1,7 @@
 import datetime
 import importlib.util
 import io
+import re
 from pathlib import Path
 
 import openpyxl
@@ -198,3 +199,19 @@ def test_row_with_only_an_unparseable_value_is_not_empty(tmp_path):
     only_bad = {column: None for column in VALID_ROWS["positions"]} | {"Nominal": "abc"}
     data = load(write_inputs(tmp_path, [only_bad]))
     assert empty_rows(data, "positions").tolist() == [False]
+
+
+@pytest.mark.parametrize("hidden", [False, True])
+def test_workbook_with_a_second_or_hidden_sheet_is_rejected(tmp_path, hidden):
+    # #1: pandas reads the first sheet even when it is hidden.
+    paths = write_inputs(tmp_path)
+    workbook = openpyxl.load_workbook(paths["positions"])
+    workbook.create_sheet("Other")
+    if hidden:
+        workbook["Sheet"].sheet_state = "hidden"
+        workbook.active = 1
+    workbook.save(paths["positions"])
+    expected = "Sheet (hidden), Other" if hidden else "Sheet, Other"
+    with pytest.raises(InputSchemaError,
+                       match=re.escape(f"exactly one visible sheet; found: {expected}.")):
+        load(paths)

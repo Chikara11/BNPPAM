@@ -14,6 +14,7 @@ STATUS_PAID = "Paid"
 STATUS_FORECAST = "Forecast"
 
 # MoveStatus vocabulary of section 2, in priority order (first reason wins).
+DUPLICATE_ROW = "Duplicate row (not evaluated)"
 MISSING_ISIN = "Missing ISIN"
 INVALID_ISIN = "Invalid ISIN"
 MISSING_MARKET_PRICE = "Missing market price"

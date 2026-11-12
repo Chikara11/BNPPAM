@@ -104,7 +104,6 @@ config.yaml ──► config.load_config() ──► Config ────┤
                                                     ▼
                                      engine.run(data, config)
                                        ├─ build Context (reference date)
-                                       ├─ keep positions at the reference date
                                        ├─ run enabled controls  ──► exceptions
                                        └─ analytics             ──► price_movements,
                                                                     upcoming_cashflows,
@@ -171,6 +170,9 @@ config.yaml ──► config.load_config() ──► Config ────┤
     normalisation: the loader does **not** trim. A value with leading or
     trailing spaces is kept as is, and reported by INVALID_VALUE if it is
     not an allowed value;
+  - the workbook must have exactly one visible sheet: a second or hidden
+    sheet raises `InputSchemaError` naming the sheets (pandas would read a
+    hidden first sheet);
   - required columns from `config.yaml`; a missing column raises
     `InputSchemaError` with the file and column name. A column name that
     appears twice in the header also raises `InputSchemaError` naming it
@@ -188,20 +190,15 @@ config.yaml ──► config.load_config() ──► Config ────┤
 - The loader does not validate values. That is the controls' job.
 
 ### 4.3 `context.py`
-- `Context` (frozen dataclass): `config`, `reference_date`, `horizon_end`,
-  `ignored_position_rows`.
-- `build_context(data, config) -> Context`: reference date = `config` value
-  if set, else latest valid `ValuationDate` in positions. No valid
-  `ValuationDate` and no config date raises `InputSchemaError` (no reference
-  date to work with: file-level error). A config date with no position at
-  that date is not an error: 0 positions, all rows ignored, shown in the
-  summary.
-- `ignored_position_rows`: position rows with a valid `ValuationDate`
-  different from the reference date.
-- `positions_at_reference_date(data, ctx) -> InputData`: keeps the
-  positions dated at the reference date **and** those whose
-  `ValuationDate` is empty or unparseable (so that MISSING_VALUE /
-  INVALID_VALUE report them instead of dropping them silently).
+- `Context` (frozen dataclass): `config`, `reference_date`, `horizon_end`.
+- `build_context(data, config) -> Context`: reference date = the single
+  valid `ValuationDate` of the positions. Zero or several valid dates raise
+  `InputSchemaError` listing the dates found and their row counts; a
+  `reference_date` in the config that differs from it raises
+  `InputSchemaError` too (file-level errors: one wrong date must never move
+  the reference date or drop positions silently). Rows with an empty or
+  unparseable `ValuationDate` are not counted and stay in the data, so that
+  MISSING_VALUE / INVALID_VALUE report them.
 
 ### 4.4 `exceptions.py`
 - `make_exceptions(rows, control_id, ctx, file, field, *, observed=None,
@@ -256,7 +253,8 @@ Placement:
   helpers live in `analytics.py`, which controls and analytics both use
   (analytics never imports the controls): `valid_isin` (rule 1),
   `duplicate_candidates` / `first_occurrence` (rule 12), `held_isins`,
-  `matching_positions` (one position per Portfolio + ISIN: valid ISIN,
+  `outside_allowed` (present value not in `allowed_values`),
+  `wrong_amount_sign`, `matching_positions` (one position per Portfolio + ISIN: valid ISIN,
   complete key, first occurrence of a duplicated position, rules 1, 4
   and 12) and `position_values` (the value of a position column for each
   cashflow: SecurityName, AssetType, MaturityDate, Currency);
@@ -295,9 +293,11 @@ Pure functions, same inputs as controls, returning the non-exception outputs:
   (enabled controls, exceptions, severity split; zeros included);
 - `summary(exceptions, data, ctx)`: counts by severity, control, dimension,
   portfolio,
-  and the headline figures of the executive summary, including
-  "Position rows not at the reference date: N (ignored)" (the rows removed
-  by the engine filter of section 4.7; information only, no exception).
+  and the headline figures of the executive summary. Upcoming totals leave
+  out the cashflows of `totalled_cashflows` = False (missing or invalid
+  Status, Amount, Currency or CashflowType), counted in "Cashflows excluded
+  from totals"; the extra rows of a duplicated position are "Duplicate row
+  (not evaluated)" in `price_movements` and never count as breaches.
 
 Amounts are always totalled per currency, never summed across currencies
 (no FX conversion), in the summary, the app and the report.
@@ -307,14 +307,10 @@ the price change formula and its rounding are those of `CLAUDE.md`.
 
 ### 4.7 `engine.py`
 - `run(data: InputData, config: Config) -> Results` is the only entry point.
-- Steps: check the registry → build context → keep only the positions with
-  `ValuationDate == reference date`, plus those with an empty or
-  unparseable `ValuationDate` (section 4.3; previous prices and cashflows
-  are not filtered; the number of position rows ignored is reported in the
-  summary, never silently) → run enabled controls in the order of
-  `config.yaml` → concatenate → sort (Severity, ControlID, Portfolio, ISIN,
+- Steps: check the registry → build context (one valuation date, section
+  4.3) → run enabled controls in the order of `config.yaml` → concatenate → sort (Severity, ControlID, Portfolio, ISIN,
   SourceRow, Field; empty values last) →
-  assign `ExceptionID` → run analytics (on the same filtered positions) →
+  assign `ExceptionID` → run analytics →
   return `Results`.
 - Severity is sorted as an ordered categorical: Critical > Warning >
   Information (not alphabetically).
@@ -333,8 +329,7 @@ the price change formula and its rounding are those of `CLAUDE.md`.
   setting, dotted path and YAML spelling, e.g. `controls.MISSING_ISIN.enabled`
   = `true`).
 - The Executive Summary shows the reference date, the run timestamp, then
-  `Results.summary` section by section, including "Position rows not at the
-  reference date (ignored)".
+  `Results.summary` section by section.
 - The Data Quality sheet holds two blocks: "Checks by dimension"
   (`Results.dimension_quality`, then the Plausibility note) and
   "Completeness by column" (`Results.data_quality`), with the autofilter on
@@ -363,8 +358,7 @@ the price change formula and its rounding are those of `CLAUDE.md`.
   passed and re-validated); "Reset to config.yaml" clears them. No
   reference-date override. The engine re-runs on every change.
 - Tabs: Summary (severity metrics, exceptions-by-control chart, every
-  `Results.summary` section, including "Position rows not at the reference
-  date (ignored)"), Exceptions (filters by severity, control, portfolio;
+  `Results.summary` section), Exceptions (filters by severity, control, portfolio;
   they only hide rows), Price Movements, Cashflows {N}D, Data Quality
   ("Checks by dimension" with the Plausibility note, then "Completeness by
   column", the same titles and note as the report, from `report.py`).
@@ -395,7 +389,7 @@ the price change formula and its rounding are those of `CLAUDE.md`.
 | Error | Raised by | Meaning |
 |---|---|---|
 | `ConfigError` | `config.py` | config.yaml incomplete or inconsistent |
-| `InputSchemaError` | `loaders.py`, `context.py` | missing column, unreadable file, or no reference date |
+| `InputSchemaError` | `loaders.py`, `context.py` | missing column, unreadable file, not exactly one visible sheet, or not exactly one valuation date |
 | `RegistryError` | `engine.py` | config and registry do not match |
 
 Bad **values** in the data never raise: they become exceptions.

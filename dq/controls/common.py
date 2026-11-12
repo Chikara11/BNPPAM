@@ -2,7 +2,8 @@ from __future__ import annotations
 
 import pandas as pd
 
-from dq.analytics import first_occurrence, held_isins, position_values, valid_isin
+from dq.analytics import (first_occurrence, held_isins, outside_allowed, position_values,
+                          valid_isin, wrong_amount_sign)
 from dq.config import COLUMN_TYPES, INPUT_FILES
 from dq.context import Context
 from dq.exceptions import combine_exceptions, make_exceptions
@@ -138,7 +139,7 @@ def allowed_value_exceptions(data: InputData, ctx: Context) -> list[pd.DataFrame
         for column, allowed in ctx.config.allowed_values.items():
             if column not in frame.columns:
                 continue
-            outside = scope & frame[column].notna() & ~frame[column].isin(allowed)
+            outside = scope & outside_allowed(frame, column, ctx)
             rows = frame[outside]
             found.append(make_exceptions(
                 rows, "INVALID_VALUE", ctx, file, column, observed=rows[column],
@@ -181,13 +182,9 @@ def cashflow_after_maturity_exceptions(data: InputData, ctx: Context) -> pd.Data
 
 
 def amount_sign_exceptions(data: InputData, ctx: Context) -> list[pd.DataFrame]:
-    # data_spec.md section 3: Coupon and Principal are inflows, Fee an outflow.
-    # An empty Amount is MISSING_VALUE; an unknown CashflowType has no sign rule.
     cashflows = data.cashflows
     sign = cashflows["CashflowType"].map(dict(ctx.config.amount_sign))
-    amount = cashflows["Amount"]
-    wrong = (evaluated_rows(data, "cashflows", ctx) & amount.notna()
-             & (((sign == "positive") & (amount <= 0)) | ((sign == "negative") & (amount >= 0))))
+    wrong = evaluated_rows(data, "cashflows", ctx) & wrong_amount_sign(cashflows, ctx)
     rows = cashflows[wrong]
     comments = [f"A {cashflow_type} amount must be "
                 f"{'greater' if expected == 'positive' else 'less'} than 0."

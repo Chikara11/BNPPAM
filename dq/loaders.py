@@ -53,9 +53,11 @@ def read_raw(source: Source, file: str) -> pd.DataFrame:
     if hasattr(source, "seek"):
         source.seek(0)  # an uploaded file may already have been read once
     try:
-        # header=None: the header row is read as data so that a duplicated
-        # column name can be detected before pandas renames it "X.1"
-        sheet = pd.read_excel(source, sheet_name=0, header=None, dtype=object)
+        with pd.ExcelFile(source) as workbook:
+            check_single_visible_sheet(workbook, file, name)
+            # header=None: the header row is read as data so that a duplicated
+            # column name can be detected before pandas renames it "X.1"
+            sheet = pd.read_excel(workbook, sheet_name=0, header=None, dtype=object)
     except (OSError, ValueError, zipfile.BadZipFile, InvalidFileException) as error:
         raise InputSchemaError(f"The {file} file ({name}) cannot be read as an Excel "
                                f"workbook: {error}") from error
@@ -70,6 +72,18 @@ def read_raw(source: Source, file: str) -> pd.DataFrame:
     data.columns = header
     data["SourceRow"] = pd.array(data.index + 1, dtype="Int64")  # header = Excel row 1
     return data.reset_index(drop=True)
+
+
+def check_single_visible_sheet(workbook: pd.ExcelFile, file: str, name: str) -> None:
+    # data_spec.md "File format": one sheet. pandas reads the first sheet even
+    # when it is hidden, so a stale hidden sheet would replace the visible data.
+    sheets = [workbook.book[title] for title in workbook.book.sheetnames]  # chartsheets too
+    if len(sheets) == 1 and sheets[0].sheet_state == "visible":
+        return
+    found = ", ".join(sheet.title if sheet.sheet_state == "visible"
+                      else f"{sheet.title} ({sheet.sheet_state})" for sheet in sheets)
+    raise InputSchemaError(f"The {file} file ({name}) must have exactly one visible sheet; "
+                           f"found: {found}. Processing stopped.")
 
 
 def check_required_columns(raw: pd.DataFrame, file: str, required: tuple[str, ...]) -> None:

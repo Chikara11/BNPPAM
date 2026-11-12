@@ -60,6 +60,8 @@ engine, and update it first if a column or rule changes.
    Amount, Status
 
 Missing required columns must stop processing with a clear message naming them.
+A workbook with more than one sheet, or a hidden sheet, also stops processing
+(pandas would read a hidden first sheet instead of the visible data).
 
 ## Configuration
 All thresholds, severities, the cashflow horizon, required columns and
@@ -72,7 +74,7 @@ duplicate keys live in `config.yaml`. Never hardcode them in the code.
 - PriceChange = MarketPrice - PreviousPrice.
 - PriceChangePct = PriceChange / PreviousPrice * 100.
 - Previous price = latest PreviousPrice strictly before the reference date
-  (= latest ValuationDate by default).
+  (= the ValuationDate).
 - Price alerts use the absolute percentage movement and trigger when
   |PriceChangePct| is strictly greater than the threshold.
 - Default thresholds: 5% for CLO Debt and ABS, 15% for CLO Equity.
@@ -81,17 +83,28 @@ duplicate keys live in `config.yaml`. Never hardcode them in the code.
   always per currency, in the summary, the app and the report.
 
 ## Reference date
-- Reference date = latest ValuationDate in positions.xlsx (overridable in config.yaml).
+- positions.xlsx must carry exactly one valid ValuationDate: it is the
+  reference date. Zero or several valid dates stop processing
+  (InputSchemaError listing the dates found and their row counts); empty or
+  unreadable ValuationDate cells are not counted (MISSING_VALUE /
+  INVALID_VALUE report them). `reference_date` in config.yaml, when set,
+  must equal that date, otherwise processing stops. This replaces the
+  earlier Q2 decision (latest date, other dates ignored), under which one
+  wrong date silently moved the reference date or dropped positions.
 - "Past-dated" means CashflowDate strictly before the reference date.
 - Upcoming cashflows: CashflowDate between the reference date and
   reference date + 30 days (inclusive), Status different from Paid.
+- Upcoming totals use only cashflows with no missing or invalid Status,
+  Amount, Currency or CashflowType (outside the allowed list, unreadable, or
+  wrong amount sign). Such rows stay listed in the upcoming table and are
+  counted in the summary line "Cashflows excluded from totals".
 
 ## Data quality rules
 Detect:
 - Missing required identifiers and values.
 - Duplicate positions (key: ValuationDate + Portfolio + ISIN). The same ISIN
-  held in two different portfolios is not a duplicate. Controls use only the
-  positions dated at the reference date.
+  held in two different portfolios is not a duplicate. All positions share
+  one ValuationDate (see "Reference date").
 - Missing current market prices.
 - Invalid or non-positive nominal and prices.
 - Missing ratings where a rating is expected (CLO Debt, ABS).
@@ -124,7 +137,8 @@ The engine follows these rules:
    Controls that do not depend on the ISIN still run on it: a missing ISIN
    and, for example, a negative Nominal are two different problems and
    raise two exceptions.
-   An ISIN that is present but does not match `isin_pattern` (config.yaml)
+   An ISIN that is present but does not match `isin_pattern` (config.yaml,
+   matched in ASCII mode: `\d` never matches full-width or other digits)
    is treated like a missing ISIN, in all 3 files: it raises only
    INVALID_VALUE and every ISIN-based control skips the row (duplicate keys,
    price history and movement, cashflow matching, currency and maturity
@@ -182,6 +196,10 @@ The engine follows these rules:
     A duplicated past Forecast cashflow gives one DUPLICATE_CASHFLOW and
     one PAST_FORECAST_CASHFLOW. Rows that the duplicate control does not
     compare (incomplete key, invalid ISIN) are always evaluated.
+    In Price Movements the extra rows of a duplicated position have
+    MoveStatus "Duplicate row (not evaluated)", no PriceChangePct and no
+    Breach, and are not counted as breaches. The DUPLICATE_POSITION comment
+    names the columns where the rows differ.
 
 ## Data quality dimensions (configurable)
 Each control belongs to one dimension (`controls.<ID>.dimension` in
@@ -245,7 +263,7 @@ Readability
 - Type hints on every public function. A docstring only on the contract
   functions named in docs/architecture.md (load_config, config_from_dict,
   with_overrides, load_inputs, truly_missing, empty_rows, build_context,
-  positions_at_reference_date, make_exceptions, empty_exceptions, the
+  make_exceptions, empty_exceptions, the
   check_* controls, the analytics outputs, engine.run, report.write_report):
   what it does, what it returns, which CLAUDE.md rule it applies.
   Everywhere else: short comments that explain WHY.

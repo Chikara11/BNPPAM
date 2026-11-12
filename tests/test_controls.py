@@ -1,7 +1,7 @@
 import pytest
 
 from dq.config import with_overrides
-from dq.context import build_context, positions_at_reference_date
+from dq.context import build_context
 from dq.controls import cashflows as cashflow_controls
 from dq.controls import common as common_controls
 from dq.controls import positions as position_controls
@@ -30,6 +30,7 @@ def test_duplicate_position_fires_once_per_key():
     assert exception["ObservedValue"] == "2026-11-11+CLO_EURO_01+SYN000000001"
     assert "Excel rows 2, 3, 4" in exception["Comment"]
     assert "counted twice" in exception["Comment"]
+    assert "Rows are identical." in exception["Comment"]
 
 
 def test_same_isin_in_two_portfolios_is_not_a_duplicate():
@@ -232,16 +233,6 @@ def test_cashflow_with_an_empty_key_is_not_unmatched(column):
     # The empty value is reported by MISSING_VALUE.
     data = make_data(cashflows=[cashflow(**{column: None})])
     assert check(cashflow_controls.check_unmatched_cashflow, data).empty
-
-
-def test_cashflow_of_a_position_outside_the_reference_date_is_unmatched():
-    # The engine only keeps positions at the reference date.
-    data = make_data([position(), position(ValuationDate="2026-11-04", ISIN="SYN000000002")],
-                     cashflows=[cashflow(ISIN="SYN000000002")])
-    ctx = build_context(data, CONFIG)
-    exceptions = cashflow_controls.check_unmatched_cashflow(
-        positions_at_reference_date(data, ctx), ctx)
-    assert exceptions["ISIN"].tolist() == ["SYN000000002"]
 
 
 def test_duplicated_position_does_not_duplicate_cashflow_checks():
@@ -534,3 +525,18 @@ def test_amount_with_the_right_sign_is_valid(cashflow_type, amount):
 def test_amount_sign_is_not_checked_on_an_unknown_cashflow_type():
     data = make_data(cashflows=[cashflow(CashflowType="Dividend", Amount=-1.0)])
     assert raised(data) == [("INVALID_VALUE", "cashflows", "CashflowType")]
+
+
+def test_duplicate_position_comment_names_the_columns_that_differ():
+    # #5: only the first row is controlled, so the comment shows what the
+    # other rows change.
+    data = make_data([position(), position(Nominal=-1.0, MarketPrice=10.0)])
+    comment = check(position_controls.check_duplicate_position, data).iloc[0]["Comment"]
+    assert comment.endswith("Rows differ on Nominal, MarketPrice.")
+
+
+def test_isin_with_non_ascii_digits_is_invalid_value_only():
+    # #6: \d also matches full-width digits unless the pattern is ASCII.
+    data = make_data([position(ISIN="SYN\uff10\uff10\uff10\uff10\uff10\uff10\uff10\uff10\uff11")],
+                     previous_prices=[], cashflows=[])
+    assert raised(data) == [("INVALID_VALUE", "positions", "ISIN")]

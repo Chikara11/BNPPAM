@@ -72,7 +72,7 @@ Rules shared by both injected datasets:
 
 | Item | Convention |
 |---|---|
-| File format | `.xlsx`, one sheet, header on row 1, one record per row, no merged cells, no totals row |
+| File format | `.xlsx`, exactly one visible sheet (a second or hidden sheet stops processing), header on row 1, one record per row, no merged cells, no totals row |
 | Column names | Exactly as written below (case-sensitive, no trailing spaces) |
 | Dates | Excel date cells, no time component. Read as pandas `datetime64`, normalised to midnight |
 | Numbers | Excel numeric cells (never numbers stored as text). Read as `float64` |
@@ -80,7 +80,7 @@ Rules shared by both injected datasets:
 | Currencies | ISO 4217 codes: `EUR`, `USD`, `GBP` |
 | Prices | Quoted per 100 of nominal (e.g. `98.5` = 98.5 % of face value) |
 | Identifiers | Synthetic, 12 characters: `SYN` + 9 digits (e.g. `SYN000000001`). Same length as an ISIN, clearly fictional, never a real ISIN |
-| Valuation date | A single valuation date per dataset: `2026-11-11` |
+| Valuation date | A single valuation date per dataset: `2026-11-11`. Positions with zero or several valid ValuationDates stop processing, as does a `reference_date` in config.yaml that differs from it (CLAUDE.md "Reference date") |
 
 Missing required columns stop processing. Invalid values (e.g. text in a numeric
 column) are reported as data quality exceptions (INVALID_VALUE, with the raw
@@ -97,7 +97,7 @@ text), never silently corrected.
 |---|---|---|---|---|
 | `ValuationDate` | date | Yes | Same value on every row in the clean dataset | `2026-11-11` |
 | `Portfolio` | string | Yes | One of the portfolio codes listed below | `CLO_EURO_01` |
-| `ISIN` | string (12) | Yes | Pattern `^SYN\d{9}$` | `SYN000000001` |
+| `ISIN` | string (12) | Yes | Pattern `^SYN\d{9}$`, matched in ASCII mode (full-width or other digits are invalid) | `SYN000000001` |
 | `SecurityName` | string | Yes | Fictional deal name + vintage + tranche | `Aurora CLO 2023-1 B` |
 | `AssetType` | category | Yes | `CLO Debt`, `CLO Equity`, `ABS` | `CLO Debt` |
 | `Currency` | string (3) | Yes | `EUR`, `USD`, `GBP` | `EUR` |
@@ -161,8 +161,8 @@ A security may have several rows (price history).
 | `PriceSource` | category | Yes | `Pricing Agent`, `Broker Quote`, `Evaluated Price` | `Pricing Agent` |
 
 **Rule used by the engine:** the previous price of a security is the price with
-the latest `PreviousDate` strictly before the reference date (= latest
-`ValuationDate` by default).
+the latest `PreviousDate` strictly before the reference date (= the
+`ValuationDate`).
 
 **Clean dataset:** every position has a previous price dated 7 days before the
 valuation date (`2026-11-04`); about half of the securities also have an older
@@ -211,8 +211,8 @@ below the threshold read from `config.yaml`.
 | `Amount` | float | Yes | Coupon and Principal > 0 (inflows); Fee < 0 (outflow) | `62500.00` |
 | `Status` | category | Yes | `Forecast`, `Confirmed`, `Paid` | `Forecast` |
 
-**Status coherence in the clean dataset** (reference date (= latest
-`ValuationDate` by default) = the single valuation date, 2026-11-11):
+**Status coherence in the clean dataset** (reference date = the single
+valuation date, 2026-11-11):
 
 | Status | CashflowDate (VD = valuation date) |
 |---|---|

@@ -9,7 +9,7 @@ from dq.config import COLUMN_TYPES, INPUT_FILES, SEVERITIES
 from dq.context import Context
 from dq.loaders import InputData, empty_rows, parse_issues_of, truly_missing
 from dq.schema import (COMPUTED, CONFLICTING_PRICES, DATA_QUALITY_COLUMNS,
-                       DIMENSION_QUALITY_COLUMNS, INVALID_ISIN,
+                       DIMENSION_QUALITY_COLUMNS, DUPLICATE_ROW, INVALID_ISIN,
                        INVALID_MARKET_PRICE, INVALID_PREVIOUS_PRICE, MISSING_ISIN,
                        MISSING_MARKET_PRICE, MISSING_PREVIOUS_PRICE, NO_PORTFOLIO,
                        NO_PRICE_HISTORY, NO_USABLE_PRICE, PRICE_MOVEMENT_COLUMNS,
@@ -22,6 +22,9 @@ from dq.schema import (COMPUTED, CONFLICTING_PRICES, DATA_QUALITY_COLUMNS,
 # Internal only, never in an output: a previous price was found but is not
 # yet checked for > 0.
 USABLE = "Usable"
+
+# A cashflow with one of these values missing or invalid is never totalled.
+TOTALLED_CASHFLOW_COLUMNS = ("Status", "Amount", "Currency", "CashflowType")
 
 DUPLICATE_KEYS = {"positions": "position_unique", "previous_prices": "previous_price_unique",
                   "cashflows": "cashflow_unique"}
@@ -124,11 +127,12 @@ def summary(exceptions: pd.DataFrame, data: InputData, ctx: Context) -> pd.DataF
     # Duplicates stay in the totals (never repaired), so they are shown here.
     add(SECTION_OVERVIEW, "Duplicated position rows (counted twice in totals)",
         (~first_occurrence(data, "positions", ctx)).sum())
-    add(SECTION_OVERVIEW, "Position rows not at the reference date (ignored)",
-        ctx.ignored_position_rows)
     add(SECTION_OVERVIEW, "Cashflows in the horizon", len(upcoming))
     add(SECTION_OVERVIEW, "Duplicated cashflow rows in the horizon",
         (~first_occurrence(data, "cashflows", ctx) & in_horizon(data, ctx)).sum())
+    totalled = upcoming["SourceRow"].isin(
+        data.cashflows.loc[totalled_cashflows(data, ctx), "SourceRow"])
+    add(SECTION_OVERVIEW, "Cashflows excluded from totals", (~totalled).sum())
 
     for severity in SEVERITIES:
         add(SECTION_BY_SEVERITY, severity, (exceptions["Severity"] == severity).sum())
@@ -145,7 +149,7 @@ def summary(exceptions: pd.DataFrame, data: InputData, ctx: Context) -> pd.DataF
     # Amounts are totalled per currency only: never summed across currencies.
     for currency, total in totals_by_currency(moves, "MarketValue", ctx):
         add(SECTION_MARKET_VALUE, "Market value", total, "amount", currency)
-    for currency, total in totals_by_currency(upcoming, "Amount", ctx):
+    for currency, total in totals_by_currency(upcoming[totalled], "Amount", ctx):
         add(SECTION_UPCOMING_CASHFLOWS, "Upcoming cashflows", total, "amount", currency)
 
     computed = int((moves["MoveStatus"] == COMPUTED).sum())
@@ -197,6 +201,7 @@ def price_move_table(data: InputData, ctx: Context) -> pd.DataFrame:
     # The first reason that applies wins, in this order (rule 7).
     price_status = previous["PreviousPriceStatus"]
     reasons = [
+        (~first_occurrence(data, "positions", ctx), DUPLICATE_ROW),  # rule 12
         (positions["ISIN"].isna(), MISSING_ISIN),
         (~valid_isin(positions, ctx), INVALID_ISIN),
         (market_price.isna(), MISSING_MARKET_PRICE),
@@ -271,7 +276,8 @@ def previous_price_by_position(data: InputData, ctx: Context) -> pd.DataFrame:
 
 
 def valid_isin(frame: pd.DataFrame, ctx: Context) -> pd.Series:
-    pattern = re.compile(ctx.config.isin_pattern)
+    # ASCII: in Python, \d also matches other scripts' digits (e.g. full-width).
+    pattern = re.compile(ctx.config.isin_pattern, re.ASCII)
     return frame["ISIN"].map(
         lambda value: isinstance(value, str) and pattern.fullmatch(value) is not None
     ).astype(bool)
@@ -309,6 +315,34 @@ def in_horizon(data: InputData, ctx: Context) -> pd.Series:
     return (~empty_rows(data, "cashflows") & dates.notna()
             & (dates >= ctx.reference_date) & (dates <= ctx.horizon_end)
             & (cashflows["Status"] != STATUS_PAID))
+
+
+def outside_allowed(frame: pd.DataFrame, column: str, ctx: Context) -> pd.Series:
+    # Present but not in allowed_values; an empty cell is a MISSING_* case (rule 2).
+    allowed = ctx.config.allowed_values.get(column)
+    if allowed is None:
+        return pd.Series(False, index=frame.index)
+    return frame[column].notna() & ~frame[column].isin(allowed)
+
+
+def wrong_amount_sign(cashflows: pd.DataFrame, ctx: Context) -> pd.Series:
+    # data_spec.md section 3: Coupon and Principal are inflows, Fee an outflow.
+    # An empty Amount is MISSING_VALUE; an unknown CashflowType has no sign rule.
+    sign = cashflows["CashflowType"].map(dict(ctx.config.amount_sign))
+    amount = cashflows["Amount"]
+    return amount.notna() & (((sign == "positive") & (amount <= 0))
+                             | ((sign == "negative") & (amount >= 0)))
+
+
+def totalled_cashflows(data: InputData, ctx: Context) -> pd.Series:
+    # A cashflow enters the currency totals only when the values that make an
+    # amount (Status, Amount, Currency, CashflowType) are present and valid:
+    # the same rule as an invalid Nominal or price. The row stays listed.
+    cashflows = data.cashflows
+    unusable = wrong_amount_sign(cashflows, ctx)
+    for column in TOTALLED_CASHFLOW_COLUMNS:
+        unusable |= cashflows[column].isna() | outside_allowed(cashflows, column, ctx)
+    return ~unusable
 
 
 def matching_positions(data: InputData, ctx: Context) -> pd.DataFrame:

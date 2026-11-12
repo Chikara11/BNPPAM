@@ -201,18 +201,10 @@ def test_no_amount_is_summed_across_currencies(input_results):
                              currency) == pytest.approx(total)
 
 
-def test_summary_shows_the_ignored_position_rows(input_data, input_results):
-    item = "Position rows not at the reference date (ignored)"
-    assert summary_value(input_results, "Overview", item) == 0
-    later = run(input_data, with_overrides(CONFIG, {"reference_date": "2026-11-12"}))
-    assert summary_value(later, "Overview", item) == 52
-    assert summary_value(later, "Overview", "Positions") == 0
-
-
 def test_summary_price_moves_add_up(input_results):
     computed = summary_value(input_results, "Price moves", "Computed")
     not_computable = summary_value(input_results, "Price moves", "Not computable")
-    assert (computed, not_computable) == (48, 4)
+    assert (computed, not_computable) == (47, 5)  # A02's extra row is not evaluated
     assert summary_value(input_results, "Price moves", "Breaches") == 3
 
 
@@ -307,3 +299,38 @@ def test_upcoming_cashflow_in_an_unknown_currency_is_listed_but_not_totalled():
     assert results.upcoming_cashflows["Currency"].tolist() == ["EUR", "CHF"]
     totals = results.summary[results.summary["Section"] == "Upcoming cashflows by currency"]
     assert list(zip(totals["Currency"], totals["Value"])) == [("EUR", 75000.0)]
+
+
+def test_upcoming_cashflow_with_a_wrong_sign_or_status_is_listed_but_not_totalled():
+    # #4: an amount whose Status, Amount, Currency or CashflowType is invalid
+    # never enters a total.
+    data = make_data(cashflows=[cashflow(), cashflow(Amount=-1000.0),
+                                cashflow(Amount=2000.0, Status="paid"),
+                                cashflow(Amount=3000.0, CashflowType=None)])
+    results = run(data, CONFIG)
+    assert len(results.upcoming_cashflows) == 4
+    assert summary_value(results, "Overview", "Cashflows excluded from totals") == 3
+    assert summary_value(results, "Upcoming cashflows by currency", "Upcoming cashflows",
+                         "EUR") == 75000.0
+
+
+def test_extra_row_of_a_duplicated_position_is_not_evaluated():
+    # #5: rule 12, the extra row is only reported by DUPLICATE_POSITION, so its
+    # move is neither shown as a breach nor counted in the summary.
+    data = make_data([position(), position(MarketPrice=10.0)])
+    results = run(data, CONFIG)
+    moves = results.price_movements.set_index("SourceRow")
+    assert moves.loc[3, "MoveStatus"] == "Duplicate row (not evaluated)"
+    assert pd.isna(moves.loc[3, "Breach"]) and pd.isna(moves.loc[3, "PriceChangePct"])
+    assert moves.loc[2, "MoveStatus"] == "Computed"
+    assert summary_value(results, "Price moves", "Breaches") == 0
+    assert summary_value(results, "Price moves", "Computed") == 1
+    assert (results.exceptions["ControlID"] == "PRICE_MOVE_ABOVE_THRESHOLD").sum() == 0
+
+
+def test_conflicting_previous_prices_leave_the_previous_price_empty():
+    # Rule 7: no price is chosen when the latest date has different prices.
+    data = make_data(previous_prices=[price(), price(PreviousPrice=50.0)])
+    move = price_movements(data, build_context(data, CONFIG)).iloc[0]
+    assert move["MoveStatus"] == "Conflicting previous prices"
+    assert pd.isna(move["PreviousPrice"]) and pd.isna(move["PriceChangePct"])

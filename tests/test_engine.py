@@ -1,10 +1,11 @@
 import dataclasses
+import re
 
 import pandas as pd
 import pytest
 
 from dq.config import config_from_dict, thaw, with_overrides
-from dq.context import build_context, positions_at_reference_date
+from dq.context import build_context
 from dq.engine import RegistryError, assign_exception_ids, check_registry, run, sort_exceptions
 from dq.exceptions import make_exceptions
 from dq.loaders import InputSchemaError
@@ -18,20 +19,30 @@ def row_at(input_data, source_row: int) -> pd.DataFrame:
     return input_data.positions[input_data.positions["SourceRow"] == source_row]
 
 
-def test_reference_date_is_the_latest_valuation_date(input_data):
+def with_valuation_dates(input_data, dates: dict[int, object]):
+    # dates: {SourceRow: new ValuationDate}
+    positions = input_data.positions.copy()
+    for source_row, date in dates.items():
+        positions.loc[positions["SourceRow"] == source_row, "ValuationDate"] = pd.Timestamp(date)
+    return dataclasses.replace(input_data, positions=positions)
+
+
+def test_reference_date_is_the_valuation_date(input_data):
     ctx = build_context(input_data, CONFIG)
     assert ctx.reference_date == pd.Timestamp("2026-11-11")
     assert ctx.horizon_end == pd.Timestamp("2026-12-11")
-    assert ctx.ignored_position_rows == 0
-    assert len(positions_at_reference_date(input_data, ctx).positions) == 52
 
 
-def test_reference_date_from_config_overrides_the_data(input_data):
-    ctx = build_context(input_data, with_overrides(CONFIG, {"reference_date": "2026-11-12"}))
-    assert ctx.reference_date == pd.Timestamp("2026-11-12")
-    # Q2: no position at that date is not an error, every row is ignored
-    assert ctx.ignored_position_rows == 52
-    assert positions_at_reference_date(input_data, ctx).positions.empty
+def test_reference_date_from_config_equal_to_the_valuation_date_is_accepted(input_data):
+    ctx = build_context(input_data, with_overrides(CONFIG, {"reference_date": "2026-11-11"}))
+    assert ctx.reference_date == pd.Timestamp("2026-11-11")
+
+
+def test_reference_date_from_config_different_from_the_valuation_date_stops(input_data):
+    # #3: a config date with no position would silently empty every total
+    config = with_overrides(CONFIG, {"reference_date": "2026-11-12"})
+    with pytest.raises(InputSchemaError, match=r"2026-11-12.*differs.*2026-11-11"):
+        build_context(input_data, config)
 
 
 def test_horizon_follows_the_config(input_data):
@@ -39,22 +50,31 @@ def test_horizon_follows_the_config(input_data):
     assert ctx.horizon_end == pd.Timestamp("2027-01-10")
 
 
-def test_no_valid_valuation_date_and_no_config_date_stops(input_data):
+def test_no_valid_valuation_date_stops(input_data):
     # Q1: there is no reference date to work with
     positions = input_data.positions.assign(ValuationDate=pd.NaT)
-    with pytest.raises(InputSchemaError, match="no valid ValuationDate"):
+    with pytest.raises(InputSchemaError, match="exactly one valid ValuationDate; found: none"):
         build_context(dataclasses.replace(input_data, positions=positions), CONFIG)
 
 
-def test_empty_valuation_date_is_kept_not_ignored(input_data):
+@pytest.mark.parametrize("other_date", ["2026-11-04", "2062-11-11"])
+def test_two_valuation_dates_stop_and_list_the_dates_and_row_counts(input_data, other_date):
+    # #2: one wrong date would move the reference date or drop a position
+    changed = with_valuation_dates(input_data, {2: other_date})
+    found = sorted([("2026-11-11", "51 rows"), (other_date, "1 row")])
+    expected = ", ".join(f"{date} ({rows})" for date, rows in found)
+    with pytest.raises(InputSchemaError, match=re.escape(f"found: {expected}.")):
+        run(changed, CONFIG)
+
+
+def test_empty_valuation_date_is_kept_and_reported(input_data):
     positions = input_data.positions.copy()
     positions.loc[positions["SourceRow"] == 2, "ValuationDate"] = pd.NaT
-    positions.loc[positions["SourceRow"] == 3, "ValuationDate"] = pd.Timestamp("2026-11-04")
-    changed = dataclasses.replace(input_data, positions=positions)
-    ctx = build_context(changed, CONFIG)
-    kept = positions_at_reference_date(changed, ctx).positions["SourceRow"]
-    assert ctx.ignored_position_rows == 1
-    assert 2 in kept.tolist() and 3 not in kept.tolist()
+    results = run(dataclasses.replace(input_data, positions=positions), CONFIG)
+    assert 2 in results.price_movements["SourceRow"].tolist()
+    exceptions = results.exceptions
+    assert ((exceptions["ControlID"] == "MISSING_VALUE") & (exceptions["SourceRow"] == 2)
+            & (exceptions["Field"] == "ValuationDate")).sum() == 1
 
 
 def test_exception_is_built_from_the_row_and_the_config(input_data):
@@ -182,14 +202,6 @@ def test_unparseable_isin_does_not_raise_missing_isin(input_data, isin_only_conf
     changed = dataclasses.replace(input_data, positions=positions,
                                   parse_issues=pd.concat([input_data.parse_issues, issue]))
     assert run(changed, isin_only_config).exceptions["SourceRow"].tolist() == [A01_SOURCE_ROW]
-
-
-def test_positions_outside_the_reference_date_are_not_controlled(input_data, isin_only_config):
-    positions = input_data.positions.copy()
-    positions.loc[positions["SourceRow"] == A01_SOURCE_ROW, "ValuationDate"] = pd.Timestamp(
-        "2026-11-04")
-    changed = dataclasses.replace(input_data, positions=positions)
-    assert run(changed, isin_only_config).exceptions.empty
 
 
 def test_exceptions_are_sorted_by_severity_then_keys():

@@ -6,7 +6,7 @@ import pandas as pd
 
 from dq import analytics
 from dq.config import Config
-from dq.context import Context, build_context, positions_at_reference_date
+from dq.context import Context, build_context
 from dq.controls import CONTROL_REGISTRY
 from dq.exceptions import combine_exceptions
 from dq.loaders import InputData
@@ -33,15 +33,13 @@ class Results:
 def run(data: InputData, config: Config) -> Results:
     """Run the engine on loaded inputs: the only entry point.
 
-    Checks the registry, builds the context, keeps the positions at the
-    reference date, runs the enabled controls in config.yaml order, sorts and
-    numbers the exceptions, then computes the analytics. Returns Results.
+    Checks the registry, builds the context (one valuation date), runs the
+    enabled controls in config.yaml order, sorts and numbers the exceptions,
+    then computes the analytics. Returns Results.
     """
     check_registry(config)
     ctx = build_context(data, config)
-    data = positions_at_reference_date(data, ctx)
     exceptions = assign_exception_ids(sort_exceptions(run_controls(data, ctx)))
-    # Analytics run on the same filtered positions as the controls.
     return Results(
         reference_date=ctx.reference_date,
         config=config,

@@ -82,7 +82,7 @@ cannot be computed.
 | 8 | PreviousDate | datetime64 | yes | Date of the latest previous price before the reference date |
 | 9 | PreviousPrice | float64 | yes | |
 | 10 | MarketPrice | float64 | yes | |
-| 11 | PriceChangePct | float64 | yes | `(MarketPrice - PreviousPrice) / PreviousPrice * 100`, rounded to 6 decimals |
+| 11 | PriceChangePct | float64 | yes | `(MarketPrice - PreviousPrice) / PreviousPrice * 100`, rounded to 6 decimals; empty when not computed or on a duplicate row |
 | 12 | ThresholdPct | float64 | yes | Threshold of the asset type, from config.yaml |
 | 13 | Breach | boolean | yes | `abs(PriceChangePct) > ThresholdPct`; empty when not computable |
 | 14 | MoveStatus | object | no | See vocabulary below |
@@ -91,6 +91,8 @@ cannot be computed.
 
 **[Decision]** `MoveStatus` vocabulary (exactly one per row; when several
 apply, the first in this list wins):
+`Duplicate row (not evaluated)` (an extra row of a duplicated position,
+exception rule 12: reported by DUPLICATE_POSITION only, never a breach),
 `Missing ISIN` (empty), `Invalid ISIN` (present but not matching
 `isin_pattern`), `Missing market price`, `Invalid market price` (<= 0),
 `No price history` (no previous_prices row for the ISIN), `No usable previous
@@ -125,9 +127,11 @@ and `Status != Paid`.
 
 Sort order: CashflowDate, Portfolio, ISIN, SourceRow.
 
-A cashflow whose Currency is empty or not allowed stays in this table (it is
-reported by MISSING_VALUE or INVALID_VALUE) but is excluded from the currency
-totals of the summary.
+A cashflow whose Status, Amount, Currency or CashflowType is empty,
+unreadable or not allowed, or whose Amount has the wrong sign, stays in this
+table (it is reported by MISSING_VALUE or INVALID_VALUE) but is excluded
+from the currency totals of the summary and counted in "Cashflows excluded
+from totals".
 
 ---
 
@@ -192,10 +196,11 @@ currencies are never mixed.
 Sections, in this order:
 1. `Overview`, in this order: `Positions` (at the reference date),
    `Portfolios`, `Distinct ISINs`, `Duplicated position rows (counted twice in
-   totals)` (extra rows of a duplicated key, never removed), `Position rows not
-   at the reference date (ignored)`, `Cashflows in the horizon`, `Duplicated
-   cashflow rows in the horizon` (extra rows of a duplicated cashflow key among
-   the upcoming cashflows; they are in the totals).
+   totals)` (extra rows of a duplicated key, never removed), `Cashflows in
+   the horizon`, `Duplicated cashflow rows in the horizon` (extra rows of a
+   duplicated cashflow key among the upcoming cashflows; they are in the
+   totals), `Cashflows excluded from totals` (upcoming cashflows with a
+   missing or invalid Status, Amount, Currency or CashflowType, section 3).
 2. `Exceptions by severity`: Critical, Warning, Information (zeros included).
 3. `Exceptions by control`: every enabled control (zeros included).
 3b. `Exceptions by dimension`: every dimension of config.yaml, in that
@@ -203,7 +208,8 @@ Sections, in this order:
 4. `Exceptions by portfolio`: every portfolio, plus `(none)` for exceptions
    without a portfolio.
 5. `Market value by currency`: sum of MarketValue where computable.
-6. `Upcoming cashflows by currency`: sum of Amount in the horizon.
+6. `Upcoming cashflows by currency`: sum of Amount in the horizon, without
+   the cashflows excluded from totals (section 3).
 
    Sections 5 and 6 list only the currencies of `allowed_values.Currency`,
    in that order: an amount in an empty or unknown currency is never

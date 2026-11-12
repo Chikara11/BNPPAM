@@ -133,17 +133,18 @@ def test_app_price_moves_have_one_panel_per_asset_type_with_their_threshold():
     assert breaches == {"ABS": 1, "CLO Debt": 1, "CLO Equity": 1}  # A07, A06, A08
     computed = sum(len(y) for name, spec in specs.items() if name != "Exceptions by control"
                    for y in bars(spec).values())
-    assert computed == 48  # summary "Price moves / Computed"
+    assert computed == 47  # summary "Price moves / Computed"
 
 
 def dot_labels(spec: dict) -> dict[str, list]:
     return {trace["name"]: trace["text"] for trace in spec["data"]}
 
 
-def test_app_duplicated_position_keeps_two_dots():
+def test_app_duplicated_position_shows_only_its_first_row():
+    # The extra row of a duplicated position is not evaluated (rule 12): no dot.
     abs_dots = dot_labels(chart_specs(started())["ABS"])["Within threshold"]
     assert [label for label in abs_dots if "SYN000000035" in label] == [
-        "ABS_EUROPE_03 · SYN000000035 (row 10)", "ABS_EUROPE_03 · SYN000000035 (row 11)"]
+        "ABS_EUROPE_03 · SYN000000035"]
 
 
 def test_app_control_chart_follows_the_enabled_controls():

@@ -466,7 +466,7 @@ def check_missing_values(files: dict) -> None:
 def check_allowed_values_and_portfolio_layout(files: dict, config: dict) -> None:
     """Invariant 4."""
     allowed = config["allowed_values"]
-    isin_pattern = re.compile(config["isin_pattern"])
+    isin_pattern = re.compile(config["isin_pattern"], re.ASCII)  # as the engine
     for name, data in files.items():
         for column, values in allowed.items():
             if column in data.columns:
