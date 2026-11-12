@@ -1,0 +1,81 @@
+from __future__ import annotations
+
+from dataclasses import dataclass
+
+import pandas as pd
+
+from dq.config import Config
+from dq.context import Context, build_context, positions_at_reference_date
+from dq.controls import CONTROL_REGISTRY
+from dq.loaders import InputData
+from dq.schema import (DATA_QUALITY_COLUMNS, EXCEPTION_COLUMNS, PRICE_MOVEMENT_COLUMNS,
+                       SUMMARY_COLUMNS, UPCOMING_CASHFLOW_COLUMNS, conform, empty_exceptions,
+                       empty_frame)
+
+SORT_COLUMNS = ["Severity", "ControlID", "Portfolio", "ISIN", "SourceRow", "Field"]
+
+
+class RegistryError(Exception):
+    pass
+
+
+@dataclass(frozen=True)
+class Results:
+    reference_date: pd.Timestamp
+    config: Config
+    exceptions: pd.DataFrame
+    price_movements: pd.DataFrame
+    upcoming_cashflows: pd.DataFrame
+    data_quality: pd.DataFrame
+    summary: pd.DataFrame
+
+
+def run(data: InputData, config: Config) -> Results:
+    check_registry(config)
+    ctx = build_context(data, config)
+    data = positions_at_reference_date(data, ctx)
+    exceptions = assign_exception_ids(sort_exceptions(run_controls(data, ctx)))
+    # Analytics come in a later iteration; until then they are typed empty tables.
+    return Results(
+        reference_date=ctx.reference_date,
+        config=config,
+        exceptions=exceptions,
+        price_movements=empty_frame(PRICE_MOVEMENT_COLUMNS),
+        upcoming_cashflows=empty_frame(UPCOMING_CASHFLOW_COLUMNS),
+        data_quality=empty_frame(DATA_QUALITY_COLUMNS),
+        summary=empty_frame(SUMMARY_COLUMNS),
+    )
+
+
+def check_registry(config: Config) -> None:
+    not_registered = [control for control in config.controls if control not in CONTROL_REGISTRY]
+    not_configured = [control for control in CONTROL_REGISTRY if control not in config.controls]
+    problems = []
+    if not_registered:
+        problems.append(f"in config.yaml but not registered: {', '.join(not_registered)}")
+    if not_configured:
+        problems.append(f"registered but not in config.yaml: {', '.join(not_configured)}")
+    if problems:
+        raise RegistryError("config.yaml and CONTROL_REGISTRY do not match: "
+                            + "; ".join(problems) + ".")
+
+
+def run_controls(data: InputData, ctx: Context) -> pd.DataFrame:
+    # config.yaml order = run order
+    found = [CONTROL_REGISTRY[control_id](data, ctx)
+             for control_id, settings in ctx.config.controls.items() if settings.enabled]
+    found = [exceptions for exceptions in found if not exceptions.empty]
+    if not found:
+        return empty_exceptions()
+    return conform(pd.concat(found, ignore_index=True), EXCEPTION_COLUMNS)
+
+
+def sort_exceptions(exceptions: pd.DataFrame) -> pd.DataFrame:
+    # Severity is an ordered category: Critical, Warning, Information.
+    return exceptions.sort_values(SORT_COLUMNS, na_position="last",
+                                  kind="stable").reset_index(drop=True)
+
+
+def assign_exception_ids(exceptions: pd.DataFrame) -> pd.DataFrame:
+    ids = [f"EXC-{number:04d}" for number in range(1, len(exceptions) + 1)]
+    return exceptions.assign(ExceptionID=pd.Series(ids, index=exceptions.index, dtype=object))

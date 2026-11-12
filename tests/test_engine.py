@@ -4,22 +4,24 @@ from pathlib import Path
 import pandas as pd
 import pytest
 
-from dq.config import load_config, with_overrides
+from dq.config import config_from_dict, load_config, thaw, with_overrides
 from dq.context import build_context, positions_at_reference_date
+from dq.controls import CONTROL_REGISTRY
+from dq.engine import RegistryError, assign_exception_ids, check_registry, run, sort_exceptions
 from dq.exceptions import make_exceptions
-from dq.loaders import InputSchemaError, load_inputs
-from dq.schema import EXCEPTION_COLUMNS, conform, empty_exceptions
+from dq.loaders import InputSchemaError
+from dq.schema import (DATA_QUALITY_COLUMNS, EXCEPTION_COLUMNS, PRICE_MOVEMENT_COLUMNS,
+                       SUMMARY_COLUMNS, UPCOMING_CASHFLOW_COLUMNS, conform, empty_exceptions,
+                       empty_frame)
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 CONFIG = load_config(REPO_ROOT / "config.yaml")
-INPUTS = REPO_ROOT / "data" / "inputs"
 A01_SOURCE_ROW = 21  # the position whose ISIN was emptied (manifest A01)
 
 
 @pytest.fixture(scope="module")
-def data():
-    return load_inputs(INPUTS / "positions.xlsx", INPUTS / "previous_prices.xlsx",
-                       INPUTS / "cashflows.xlsx", CONFIG)
+def data(input_data):
+    return input_data
 
 
 def row_at(data, source_row: int) -> pd.DataFrame:
@@ -112,3 +114,104 @@ def test_unknown_severity_is_rejected(data):
     broken = exceptions.astype({"Severity": object}).assign(Severity="High")
     with pytest.raises(AssertionError, match="High"):
         conform(broken, EXCEPTION_COLUMNS)
+
+
+def exceptions_frame(rows: list[dict]) -> pd.DataFrame:
+    filler = {"ExceptionID": None, "ControlID": "X", "AnomalyType": "x", "Source": "positions",
+              "ISIN": "SYN000000001", "SecurityName": None, "ObservedValue": None,
+              "Comment": "x", "Field": "F"}
+    return conform(pd.DataFrame([{**filler, **row} for row in rows]), EXCEPTION_COLUMNS)
+
+
+def test_real_config_needs_every_control_registered(real_config, data):
+    # TEMPORARY: removed when the last control is registered.
+    missing = [control for control in real_config.controls if control not in CONTROL_REGISTRY]
+    assert len(missing) == 13
+    with pytest.raises(RegistryError) as error:
+        check_registry(real_config)
+    assert all(control in str(error.value) for control in missing)
+    with pytest.raises(RegistryError):
+        run(data, real_config)
+
+
+def test_registered_control_missing_from_the_config_is_an_error(real_config):
+    raw = thaw(real_config.raw)
+    raw["controls"] = {"DUPLICATE_POSITION": raw["controls"]["DUPLICATE_POSITION"]}
+    with pytest.raises(RegistryError, match="not registered: DUPLICATE_POSITION.*"
+                                            "not in config.yaml: MISSING_ISIN"):
+        check_registry(config_from_dict(raw))
+
+
+def test_run_on_inputs(input_results):
+    exceptions = input_results.exceptions
+    assert exceptions["ExceptionID"].tolist() == ["EXC-0001"]
+    assert exceptions.loc[0, "ControlID"] == "MISSING_ISIN"
+    assert exceptions.loc[0, "SourceRow"] == A01_SOURCE_ROW
+    assert input_results.reference_date == pd.Timestamp("2026-11-11")
+
+
+def test_outputs_have_the_documented_columns(input_results):
+    assert input_results.exceptions.dtypes.equals(empty_exceptions().dtypes)
+    for output, columns in [("price_movements", PRICE_MOVEMENT_COLUMNS),
+                            ("upcoming_cashflows", UPCOMING_CASHFLOW_COLUMNS),
+                            ("data_quality", DATA_QUALITY_COLUMNS),
+                            ("summary", SUMMARY_COLUMNS)]:
+        assert getattr(input_results, output).dtypes.equals(empty_frame(columns).dtypes)
+
+
+def test_disabled_control_does_not_run(data, test_config):
+    config = with_overrides(test_config, {"controls": {"MISSING_ISIN": {"enabled": False}}})
+    exceptions = run(data, config).exceptions
+    assert exceptions.empty
+    assert exceptions.dtypes.equals(empty_exceptions().dtypes)
+
+
+def test_same_inputs_give_the_same_exceptions(data, test_config, input_results):
+    pd.testing.assert_frame_equal(run(data, test_config).exceptions, input_results.exceptions)
+
+
+def test_empty_row_does_not_raise_missing_isin(data, test_config):
+    # Rule 11: reported once by INVALID_VALUE (later), never by MISSING_ISIN.
+    empty_row = pd.DataFrame({"SourceRow": pd.array([99], dtype="Int64")})
+    positions = pd.concat([data.positions, empty_row], ignore_index=True)
+    exceptions = run(dataclasses.replace(data, positions=positions), test_config).exceptions
+    assert exceptions["SourceRow"].tolist() == [A01_SOURCE_ROW]
+
+
+def test_unparseable_isin_does_not_raise_missing_isin(data, test_config):
+    # Rule 10: a non-text ISIN is a parse issue, reported only by INVALID_VALUE.
+    positions = data.positions.copy()
+    positions.loc[positions["SourceRow"] == 2, "ISIN"] = None
+    issue = pd.DataFrame({"File": ["positions"], "SourceRow": pd.array([2], dtype="Int64"),
+                          "Column": ["ISIN"], "RawValue": ["123456789012"]})
+    changed = dataclasses.replace(data, positions=positions,
+                                  parse_issues=pd.concat([data.parse_issues, issue]))
+    assert run(changed, test_config).exceptions["SourceRow"].tolist() == [A01_SOURCE_ROW]
+
+
+def test_positions_outside_the_reference_date_are_not_controlled(data, test_config):
+    positions = data.positions.copy()
+    positions.loc[positions["SourceRow"] == A01_SOURCE_ROW, "ValuationDate"] = pd.Timestamp(
+        "2026-11-04")
+    assert run(dataclasses.replace(data, positions=positions), test_config).exceptions.empty
+
+
+def test_exceptions_are_sorted_by_severity_then_keys():
+    unsorted = exceptions_frame([
+        {"Severity": "Information", "Portfolio": "A", "SourceRow": 2},
+        {"Severity": "Critical", "Portfolio": None, "SourceRow": 2},
+        {"Severity": "Critical", "Portfolio": "B", "SourceRow": 5, "Field": "MarketPrice"},
+        {"Severity": "Critical", "Portfolio": "B", "SourceRow": 5, "Field": "BookPrice"},
+        {"Severity": "Warning", "Portfolio": "A", "SourceRow": 3},
+    ])
+    ordered = sort_exceptions(unsorted)
+    assert ordered["Severity"].tolist() == ["Critical"] * 3 + ["Warning", "Information"]
+    assert ordered["Field"].tolist()[:2] == ["BookPrice", "MarketPrice"]
+    assert pd.isna(ordered.loc[2, "Portfolio"])  # empty Portfolio sorts last
+
+
+def test_exception_ids_follow_the_sorted_order():
+    exceptions = exceptions_frame([{"Severity": "Warning", "Portfolio": "A", "SourceRow": row}
+                                   for row in (2, 3, 4)])
+    assert assign_exception_ids(exceptions)["ExceptionID"].tolist() == [
+        "EXC-0001", "EXC-0002", "EXC-0003"]
