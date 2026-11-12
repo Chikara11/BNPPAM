@@ -3,6 +3,71 @@
 This document is the contract between the synthetic data generator and the
 processing engine. Any change to a column, type or rule must be made here first.
 
+## Datasets
+
+Two datasets with two purposes, built by the same generator and injector,
+under the same file contract (sections 1 to 3), the same clean-data
+invariants (section 4) and the same `config.yaml`. Each one has a clean base
+that raises zero exceptions and an injected copy with an exact oracle.
+
+| | Test fixture | Large sample |
+|---|---|---|
+| Purpose | Unit-test fixture: one isolated anomaly per control, easy to read | Production-like feed: behaviour, volumes and rates at scale |
+| Clean base / injected files | `data/clean/` / `data/inputs/` | `data/large_clean/` / `data/large/` |
+| Oracle | `docs/anomaly_manifest.xlsx` | `docs/large_manifest.xlsx` |
+| Scripts | `generate_clean_data.py`, `inject_anomalies.py` | `generate_large_sample.py` (reuses both) |
+| Seed | 42 | 43 |
+| Securities, layout | 48, section 5 | 480: the same layout x10, 20 held in two portfolios |
+| Identifiers | `SYN000000001`... | `SYN001000001`...; securities never held `SYN0019999xx` |
+| Anomalies | 15 single cases + 4 no-alert cases (N01-N04) | 79 single cases weighted like a production feed (frequent operational issues, rare critical ones), 5 rows with two problems, 10 near-boundary no-alert cases (B01-B10) |
+
+Sizes and exceptions (computed by the engine on the files):
+
+| Folder | positions | previous_prices | cashflows | Rows | Exceptions | Critical / Warning / Information | Rows with an exception |
+|---|---|---|---|---|---|---|---|
+| `data/clean` | 50 | 66 | 211 | 327 | 0 | 0 / 0 / 0 | 0 (0.0 %) |
+| `data/inputs` | 52 | 65 | 210 | 327 | 15 | 6 / 7 / 2 | 15 (4.6 %) |
+| `data/large_clean` | 500 | 703 | 2,111 | 3,314 | 0 | 0 / 0 / 0 | 0 (0.0 %) |
+| `data/large` | 504 | 696 | 2,095 | 3,295 | 89 | 24 / 56 / 9 | 84 (2.5 %) |
+
+Expected exceptions per control (from the two manifests; checked by
+`tests/test_large_sample.py`):
+
+| Control | Severity | `data/inputs` | `data/large` |
+|---|---|---|---|
+| MISSING_ISIN | Critical | 1 | 4 |
+| DUPLICATE_POSITION | Critical | 1 | 4 |
+| MISSING_MARKET_PRICE | Critical | 1 | 7 |
+| INVALID_NOMINAL | Critical | 2 | 5 |
+| INVALID_PRICE | Critical | 1 | 4 |
+| MISSING_RATING | Warning | 1 | 9 |
+| PRICE_MOVE_ABOVE_THRESHOLD | Warning | 3 | 10 |
+| NO_PRICE_HISTORY | Information | 1 | 5 |
+| DUPLICATE_PREVIOUS_PRICE | Warning | 0 | 3 |
+| UNMATCHED_CASHFLOW | Warning | 1 | 6 |
+| DUPLICATE_CASHFLOW | Warning | 1 | 5 |
+| PAST_FORECAST_CASHFLOW | Warning | 1 | 12 |
+| CURRENCY_MISMATCH | Information | 1 | 4 |
+| INVALID_VALUE | Warning | 0 | 6 |
+| MISSING_VALUE | Warning | 0 | 5 |
+| **Total** | | **15** | **89** |
+
+Rules shared by both injected datasets:
+- One case per security, never on a security held in two portfolios.
+- One anomaly = one exception (CLAUDE.md exception rules). Where a real feed
+  would cascade, the case removes the cascade and says so in its
+  Description: a position whose ISIN is emptied loses its previous prices
+  and cashflows; a position matured before the reference date loses its
+  cashflows dated after its maturity.
+- Price cases set exact previous and market prices on securities without a
+  VD-14 price, so the reset previous price is the whole history (the
+  fixture's A08 instead sets its VD-14 price next to the new one).
+- An exception on a `previous_prices` row has no Portfolio (that file has
+  none): its manifest row leaves Portfolio empty and names the portfolio in
+  the Description.
+- The large sample also holds one text cell in a number column
+  (`"2,250,000"` as Nominal): a parse issue, reported only by INVALID_VALUE.
+
 ## General conventions
 
 | Item | Convention |

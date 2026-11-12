@@ -17,8 +17,26 @@ python3.12 -m venv .venv
 .venv/bin/python -m pytest -q -W error            # the tests
 ```
 
-The app opens on the bundled sample (`data/inputs/`); the sidebar also
-accepts an upload of the 3 files.
+The app opens on the test fixture (`data/inputs/`); the sidebar switches to
+the large sample (`data/large/`) or accepts an upload of the 3 files.
+
+## Sample data
+
+Two synthetic datasets, one design: same file contract, same clean-data
+invariants, same `config.yaml`. Each has a clean base (zero exceptions) and
+an injected copy checked against an exact oracle.
+
+| | Test fixture | Large sample |
+|---|---|---|
+| Purpose | One isolated anomaly per control (unit and end-to-end tests) | Production-like feed: volumes and rates at scale |
+| Files | `data/clean/` -> `data/inputs/` | `data/large_clean/` -> `data/large/` |
+| Oracle | `docs/anomaly_manifest.xlsx` | `docs/large_manifest.xlsx` |
+| Positions / cashflows | 52 / 210 | 504 / 2,095 |
+| Expected exceptions | 15 | 89, plus 10 near-boundary cases that must stay silent |
+| Regenerate | `python scripts/generate_clean_data.py` then `python scripts/inject_anomalies.py` | `python scripts/generate_large_sample.py` |
+
+Rows per file, exceptions per control and rates: `docs/data_spec.md`,
+section "Datasets" (checked against the manifests by the tests).
 
 ## Deployed app
 

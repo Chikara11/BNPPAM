@@ -30,10 +30,21 @@ This is a synthetic demonstration, not a production financial system.
 - Never use real portfolio, market or client data or any confidential information.
 - Synthetic identifiers: 12 characters, `SYN` + 9 digits (e.g. SYN000000001),
   same length as an ISIN but clearly fictional.
-- Deterministic random seed: 42.
-- Keep clean data generation separate from anomaly injection. The clean
-  dataset must raise zero exceptions; clean price movements are truncated
+- Two datasets, one design (docs/data_spec.md "Datasets"), same file
+  contract, invariants and config.yaml:
+  - test fixture: `data/clean/` -> `data/inputs/`, oracle
+    `docs/anomaly_manifest.xlsx`, seed 42, ISINs `SYN000000001`...; one
+    isolated anomaly per control, the oracle of the unit and end-to-end
+    tests;
+  - large sample: `data/large_clean/` -> `data/large/`, oracle
+    `docs/large_manifest.xlsx`, seed 43, ISINs `SYN001000001`...; a
+    production-like feed (500 positions, anomalies weighted like
+    production, two-problem rows, near-boundary cases).
+- Keep clean data generation separate from anomaly injection. Each clean
+  base must raise zero exceptions; clean price movements are truncated
   below the thresholds (see docs/data_spec.md).
+- Counts in tests and docs are computed from the manifests and the files,
+  never typed.
 - Never silently repair or overwrite source data: detect and report only.
 
 ## Input files
@@ -281,6 +292,8 @@ Before every commit
 - Generate clean data: `python scripts/generate_clean_data.py` → `data/clean/`
 - Inject anomalies:    `python scripts/inject_anomalies.py` → `data/inputs/`
   (deliverable input files) and `docs/anomaly_manifest.xlsx`
+- Large sample:        `python scripts/generate_large_sample.py` →
+  `data/large_clean/`, `data/large/` and `docs/large_manifest.xlsx`
 - Run tests:           `pytest -q`
 - Run the report:      `python -m scripts.run_report --inputs data/inputs --output output/report.xlsx`
   (from the repo root, as a module, so that it can import `dq`)

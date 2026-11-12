@@ -135,9 +135,13 @@ def test_app_price_moves_have_one_panel_per_asset_type_with_their_threshold():
     assert computed == 48  # summary "Price moves / Computed"
 
 
-def test_app_duplicated_position_keeps_two_bars():
-    abs_bars = bars(chart_specs(started())["ABS"])["Within threshold"]
-    assert [label for label in abs_bars if "SYN000000035" in label] == [
+def dot_labels(spec: dict) -> dict[str, list]:
+    return {trace["name"]: trace["text"] for trace in spec["data"]}
+
+
+def test_app_duplicated_position_keeps_two_dots():
+    abs_dots = dot_labels(chart_specs(started())["ABS"])["Within threshold"]
+    assert [label for label in abs_dots if "SYN000000035" in label] == [
         "ABS_EUROPE_03 · SYN000000035 (row 10)", "ABS_EUROPE_03 · SYN000000035 (row 11)"]
 
 
@@ -169,3 +173,28 @@ def test_app_severity_cells_and_breach_rows_are_tinted():
     for tint in SEVERITY_TINTS.values():
         assert styled_rows(app, 1, tint)
     assert len(styled_rows(app, 2, BREACH_TINT)) == 3
+
+
+def large_sample(app: AppTest) -> AppTest:
+    return app.radio(key="source").set_value("Large sample (data/large)").run()
+
+
+def test_app_large_sample_shows_the_manifest_exceptions():
+    manifest = pd.read_excel(REPO_ROOT / "docs" / "large_manifest.xlsx", dtype=object)
+    expected = manifest[manifest["ExpectedExceptionCount"] > 0]
+    by_severity = expected.groupby("ExpectedSeverity")["ExpectedExceptionCount"].sum()
+    app = large_sample(started())
+    assert not app.exception and not app.error
+    assert {metric.label: int(metric.value) for metric in app.metric} == by_severity.to_dict()
+    assert len(exceptions_shown(app)) == expected["ExpectedExceptionCount"].sum()
+
+
+def test_app_large_sample_strips_show_every_computed_move_at_a_fixed_height():
+    app = large_sample(started())
+    moves = app.tabs[2].dataframe[0].value
+    specs = {name: spec for name, spec in chart_specs(app).items()
+             if name != "Exceptions by control"}
+    dots = sum(len(x) for spec in specs.values() for x in
+               [trace["x"] for trace in spec["data"]])
+    assert dots == (moves["MoveStatus"] == "Computed").sum()
+    assert {spec["layout"]["height"] for spec in specs.values()} == {260}

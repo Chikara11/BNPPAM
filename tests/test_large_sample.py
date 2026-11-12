@@ -1,3 +1,4 @@
+import re
 import time
 from collections import Counter
 
@@ -11,6 +12,8 @@ from helpers import CONFIG, REPO_ROOT
 LARGE_DIR = REPO_ROOT / "data" / "large"
 LARGE_CLEAN_DIR = REPO_ROOT / "data" / "large_clean"
 LARGE_MANIFEST = REPO_ROOT / "docs" / "large_manifest.xlsx"
+FIXTURE_MANIFEST = REPO_ROOT / "docs" / "anomaly_manifest.xlsx"
+DATA_SPEC = REPO_ROOT / "docs" / "data_spec.md"
 MAX_RUN_SECONDS = 5.0
 
 
@@ -124,3 +127,30 @@ def test_large_sample_engine_run_is_fast(large_data):
     start = time.perf_counter()
     run(large_data, CONFIG)
     assert time.perf_counter() - start < MAX_RUN_SECONDS
+
+
+def expected_by_control(manifest_path) -> dict:
+    manifest = pd.read_excel(manifest_path, dtype=object)
+    return expected_rows(manifest).groupby("ExpectedControl")["ExpectedExceptionCount"].sum()
+
+
+def test_data_spec_control_table_matches_the_two_manifests():
+    # data_spec.md "Datasets": | CONTROL | Severity | inputs | large |
+    rows = re.findall(r"^\| ([A-Z_]+) \| (\w+) \| (\d+) \| (\d+) \|$",
+                      DATA_SPEC.read_text(encoding="utf-8"), flags=re.MULTILINE)
+    fixture, large = expected_by_control(FIXTURE_MANIFEST), expected_by_control(LARGE_MANIFEST)
+    assert [row[0] for row in rows] == list(CONFIG.controls)
+    for control, severity, in_fixture, in_large in rows:
+        assert severity == CONFIG.controls[control].severity, control
+        assert (int(in_fixture), int(in_large)) == (fixture.get(control, 0),
+                                                    large.get(control, 0)), control
+
+
+@pytest.mark.parametrize("folder", ["data/clean", "data/inputs", "data/large_clean",
+                                    "data/large"])
+def test_data_spec_size_table_matches_the_files(folder):
+    line = next(line for line in DATA_SPEC.read_text(encoding="utf-8").splitlines()
+                if line.startswith(f"| `{folder}` |"))
+    sizes = [int(cell.replace(",", "")) for cell in line.split("|")[2:5]]
+    data = load(REPO_ROOT / folder)
+    assert sizes == [len(data.positions), len(data.previous_prices), len(data.cashflows)]

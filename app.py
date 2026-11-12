@@ -20,8 +20,9 @@ from dq.schema import COMPUTED, NO_PORTFOLIO, SECTION_BY_CONTROL, SECTION_BY_SEV
 
 REPO_ROOT = Path(__file__).resolve().parent
 CONFIG_PATH = REPO_ROOT / "config.yaml"
-SAMPLE_DIR = REPO_ROOT / "data" / "inputs"
-SAMPLE = "Bundled sample (data/inputs)"
+# Bundled datasets (docs/data_spec.md "Datasets"); the fixture is the default.
+SAMPLES = {"Test fixture (data/inputs)": REPO_ROOT / "data" / "inputs",
+           "Large sample (data/large)": REPO_ROOT / "data" / "large"}
 UPLOAD = "Upload the 3 files"
 SETTING_KEY = "setting_"  # prefix of the sidebar widgets that Reset clears
 XLSX_MIME = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
@@ -36,7 +37,9 @@ INK = "#0b0b0b"  # dark text on the light tints, readable in the dark theme too
 SERIES_COLOUR = "#2a78d6"
 BREACH_COLOUR = "#d03b3b"
 RULE_COLOUR = "#898781"
-BAR_HEIGHT = 26  # pixels per bar, so long panels stay readable
+BAR_HEIGHT = 26  # pixels per bar of the control chart
+STRIP_HEIGHT = 260  # pixels per price-move panel, whatever the number of positions
+DOT_SIZE = 9
 
 
 def main() -> None:
@@ -60,9 +63,9 @@ def main() -> None:
 
 
 def input_data() -> InputData | None:
-    source = st.sidebar.radio("Input files", [SAMPLE, UPLOAD], key="source")
-    if source == SAMPLE:
-        files = {file: (SAMPLE_DIR / f"{file}.xlsx").read_bytes() for file in INPUT_FILES}
+    source = st.sidebar.radio("Input files", [*SAMPLES, UPLOAD], key="source")
+    if source in SAMPLES:
+        files = {file: (SAMPLES[source] / f"{file}.xlsx").read_bytes() for file in INPUT_FILES}
     else:
         uploads = {file: st.sidebar.file_uploader(f"{file}.xlsx", type="xlsx",
                                                   key=f"upload_{file}")
@@ -186,17 +189,24 @@ def show_price_movements(moves: pd.DataFrame) -> None:
 
 
 def price_move_figure(asset_type: str, rows: pd.DataFrame) -> go.Figure:
+    # One dot per computed position on the change axis: the same chart reads
+    # at 50 or 500 positions (bars would need one line each).
     rows = rows.sort_values(["PriceChangePct", "SourceRow"], kind="stable")
     labels = position_labels(rows)
+    spread = strip_spread(rows)
     breach = rows["Breach"].fillna(False).astype(bool)
     threshold = rows["ThresholdPct"].iloc[0]  # one threshold per asset type
     figure = go.Figure()
     for name, selected, colour in [("Within threshold", ~breach, SERIES_COLOUR),
                                    ("Breach", breach, BREACH_COLOUR)]:
         if selected.any():
-            figure.add_bar(x=rows.loc[selected, "PriceChangePct"], y=labels[selected],
-                           orientation="h", name=name, marker_color=colour,
-                           hovertemplate="%{y}: %{x:+.2f} %<extra>" + name + "</extra>")
+            # Lists, not arrays: plotly would encode arrays as binary data.
+            figure.add_scatter(
+                x=rows.loc[selected, "PriceChangePct"].tolist(), y=spread[selected].tolist(),
+                text=labels[selected].tolist(), mode="markers", name=name,
+                marker={"color": colour, "size": DOT_SIZE,
+                        "line": {"width": 1, "color": "rgba(255, 255, 255, 0.8)"}},
+                hovertemplate="%{text}: %{x:+.2f} %<extra>" + name + "</extra>")
     for limit in (-threshold, threshold):
         figure.add_vline(x=limit, line_dash="dash", line_width=1, line_color=RULE_COLOUR,
                          annotation_text=f"{limit:+g} %", annotation_font_color=RULE_COLOUR)
@@ -204,11 +214,16 @@ def price_move_figure(asset_type: str, rows: pd.DataFrame) -> go.Figure:
     reach = max(threshold, rows["PriceChangePct"].abs().max()) * 1.15
     figure.update_layout(
         title=f"{asset_type}: change vs previous price (%), threshold ±{threshold:g} %",
-        barmode="relative", barcornerradius=4, height=BAR_HEIGHT * len(rows) + 140,
-        legend={"orientation": "h", "y": 1.02, "yanchor": "bottom"},
+        height=STRIP_HEIGHT, legend={"orientation": "h", "y": 1.02, "yanchor": "bottom"},
         xaxis={"range": [-reach, reach], "ticksuffix": " %", "zeroline": True},
-        yaxis={"categoryorder": "array", "categoryarray": list(labels)})
+        yaxis={"visible": False, "range": [-1, 1]})
     return figure
+
+
+def strip_spread(rows: pd.DataFrame) -> pd.Series:
+    # Vertical position with no meaning, a fixed function of the Excel row (no
+    # randomness, so the chart is the same on every run): close dots stay apart.
+    return (rows["SourceRow"].astype(int) * 37 % 17 - 8) / 10
 
 
 def position_labels(rows: pd.DataFrame) -> pd.Series:

@@ -62,6 +62,7 @@ securitised-credit-dq/
 ├── scripts/
 │   ├── generate_clean_data.py
 │   ├── inject_anomalies.py
+│   ├── generate_large_sample.py  # large sample: clean base + injection (reuses both)
 │   └── run_report.py         # CLI: load -> run -> write report (run with -m)
 ├── tests/
 │   ├── conftest.py
@@ -74,11 +75,13 @@ securitised-credit-dq/
 │   ├── test_analytics.py
 │   ├── test_boundaries.py
 │   ├── test_report.py
-│   └── test_app.py
-├── data/clean/   data/inputs/
+│   ├── test_app.py
+│   └── test_large_sample.py
+├── data/clean/   data/inputs/          # test fixture: clean base, injected
+├── data/large_clean/   data/large/     # large sample: clean base, injected
 ├── output/                   # generated reports (git-ignored)
 └── docs/                     # architecture.md, data_spec.md, output_spec.md,
-                              # anomaly_manifest.xlsx
+                              # anomaly_manifest.xlsx, large_manifest.xlsx
 ```
 
 `app.py` and the tests import `dq` directly (`import dq`): `streamlit run
@@ -343,8 +346,9 @@ the price change formula and its rounding are those of `CLAUDE.md`.
 
 ### 4.9 `app.py`
 - Run with `streamlit run app.py` from the repo root.
-- Sidebar: bundled `data/inputs/` sample or upload of the 3 files (nothing
-  runs until all 3 are there); thresholds per asset type, horizon and one
+- Sidebar: data source "Test fixture (data/inputs)" (default), "Large
+  sample (data/large)" or "Upload the 3 files" (nothing runs until all 3
+  are there); thresholds per asset type, horizon and one
   checkbox per control, applied through `with_overrides` (every value is
   passed and re-validated); "Reset to config.yaml" clears them. No
   reference-date override. The engine re-runs on every change.
@@ -352,10 +356,13 @@ the price change formula and its rounding are those of `CLAUDE.md`.
   `Results.summary` section, including "Position rows not at the reference
   date (ignored)"), Exceptions (filters by severity, control, portfolio;
   they only hide rows), Price Movements, Cashflows {N}D, Data Quality.
-- Price Movements chart: one panel per asset type (the thresholds differ),
-  one horizontal bar per computed position, breach / within threshold
-  colours with a legend, dashed ±threshold lines, symmetric axis. A
-  duplicated position keeps two bars (its Excel row is added to the label).
+- Price Movements chart: one dot strip per asset type (the thresholds
+  differ), one dot per computed position on the x axis (change in %),
+  breach / within threshold colours with a legend, dashed ±threshold lines,
+  symmetric axis. The vertical spread is a fixed function of the Excel row
+  (no meaning, no randomness), so close dots stay visible; the same chart
+  reads at 50 or 500 positions. The hover names Portfolio · ISIN, with the
+  Excel row for a duplicated position.
 - Same look as the report: the severity and breach tints and the column
   formats come from `report.py` (`SEVERITY_TINTS`, `BREACH_TINT`,
   `COLUMN_FORMATS`), translated to Streamlit syntax.
@@ -420,6 +427,11 @@ Changing a threshold or a severity = edit `config.yaml` only.
   headers, rows, number formats, colours, plain text against formula
   injection, Executive Summary, Parameters) and the `run_report` CLI
   (a real `python -m` run, readable errors with exit code 1).
+- `test_large_sample.py`: the large sample against `docs/large_manifest.xlsx`
+  (clean base 0 exceptions, exact multiset of ControlID + Portfolio + ISIN,
+  totals and severities, two-problem rows, near-boundary cases, engine run
+  under 5 s) and the "Datasets" tables of data_spec.md against the
+  manifests and the files.
 - `test_app.py`: the app driven by `streamlit.testing.v1.AppTest` (sample
   and real uploads, sidebar settings, reset, filters, errors, chart
   content read from the figure spec, column formats and tints).
