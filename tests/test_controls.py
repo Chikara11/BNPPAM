@@ -485,6 +485,32 @@ def test_repeated_rows_with_a_bad_isin_are_each_evaluated():
     assert raised(data) == [("INVALID_VALUE", "positions", "ISIN")] * 2
 
 
+@pytest.mark.parametrize("data", [
+    make_data([position(Portfolio=None), position(Portfolio=None)], cashflows=[]),
+    make_data(cashflows=[cashflow(Amount=None), cashflow(Amount=None)]),
+])
+def test_repeated_rows_with_an_incomplete_key_are_each_evaluated(data):
+    # Rule 12: an incomplete key is not compared by the duplicate control,
+    # so both rows are reported and no duplicate is raised.
+    file, column = ("positions", "Portfolio") if data.cashflows.empty else ("cashflows", "Amount")
+    assert raised(data) == [("MISSING_VALUE", file, column)] * 2
+
+
+def test_empty_valuation_date_is_missing_value_only():
+    # Kept by the reference date filter so that it is reported, not dropped.
+    data = make_data([position(), position(Portfolio="CLO_GLOBAL_02", ValuationDate=None)])
+    assert raised(data) == [("MISSING_VALUE", "positions", "ValuationDate")]
+
+
+def test_unparseable_valuation_date_is_invalid_value_only():
+    data = make_data([position(), position(Portfolio="CLO_GLOBAL_02", ValuationDate=None)],
+                     parse_issues=parse_issue("positions", 3, "ValuationDate", "11/11/2026"))
+    exceptions = check(common_controls.check_invalid_value, data)
+    assert exceptions[["Field", "ObservedValue"]].values.tolist() == [
+        ["ValuationDate", "11/11/2026"]]
+    assert raised(data) == [("INVALID_VALUE", "positions", "ValuationDate")]
+
+
 @pytest.mark.parametrize("cashflow_type, amount, comment", [
     ("Fee", 4500.0, "A Fee amount must be less than 0."),
     ("Fee", 0.0, "A Fee amount must be less than 0."),
