@@ -1,15 +1,13 @@
 import copy
 import dataclasses
 import datetime
-from pathlib import Path
 
 import pandas as pd
 import pytest
 import yaml
 
 from dq.config import ConfigError, config_from_dict, load_config, with_overrides
-
-CONFIG_PATH = Path(__file__).resolve().parent.parent / "config.yaml"
+from helpers import CONFIG_PATH
 
 
 @pytest.fixture(scope="module")

@@ -1,13 +1,13 @@
 import pytest
 
-from dq.config import COLUMN_TYPES, with_overrides
+from dq.config import with_overrides
 from dq.context import build_context, positions_at_reference_date
 from dq.controls import cashflows as cashflow_controls
 from dq.controls import common as common_controls
 from dq.controls import positions as position_controls
 from dq.controls import prices as price_controls
-from helpers import (CONFIG, EMPTY_POSITION, cashflow, check, make_data, parse_issue,
-                     position, price, raised)
+from helpers import (CONFIG, cashflow, check, empty_row, make_data, parse_issue, position,
+                     price, raised)
 
 
 def test_missing_isin_fires():
@@ -66,7 +66,7 @@ def test_unparseable_market_price_is_not_missing():
 
 def test_empty_row_is_not_a_missing_market_price():
     # Rule 11: an empty row is reported once, by INVALID_VALUE.
-    data = make_data([position(), EMPTY_POSITION])
+    data = make_data([position(), empty_row("positions")])
     assert check(position_controls.check_missing_market_price, data).empty
 
 
@@ -372,9 +372,9 @@ def test_unparseable_cell_is_invalid_value_only_with_the_raw_text():
 
 @pytest.mark.parametrize("file", ["positions", "previous_prices", "cashflows"])
 def test_empty_row_is_reported_once_in_every_file(file):
-    empty = {column: None for column in COLUMN_TYPES[file]}
-    rows = {"positions": [position(), empty], "previous_prices": [price(), empty],
-            "cashflows": [cashflow(), empty]}
+    rows = {"positions": [position(), empty_row(file)],
+            "previous_prices": [price(), empty_row(file)],
+            "cashflows": [cashflow(), empty_row(file)]}
     data = make_data(**{file: rows[file]})
     exceptions = check(common_controls.check_invalid_value, data)
     assert exceptions[["Field", "Comment", "SourceRow"]].values.tolist() == [["row", "Empty row", 3]]

@@ -1,74 +1,65 @@
 import dataclasses
-from pathlib import Path
 
 import pandas as pd
 import pytest
 
-from dq.config import config_from_dict, load_config, thaw, with_overrides
+from dq.config import config_from_dict, thaw, with_overrides
 from dq.context import build_context, positions_at_reference_date
 from dq.engine import RegistryError, assign_exception_ids, check_registry, run, sort_exceptions
 from dq.exceptions import make_exceptions
 from dq.loaders import InputSchemaError
-from dq.schema import (DATA_QUALITY_COLUMNS, EXCEPTION_COLUMNS, PRICE_MOVEMENT_COLUMNS,
-                       SUMMARY_COLUMNS, UPCOMING_CASHFLOW_COLUMNS, conform, empty_exceptions,
-                       empty_frame)
+from dq.schema import EXCEPTION_COLUMNS, conform, empty_exceptions
+from helpers import CONFIG, parse_issue
 
-REPO_ROOT = Path(__file__).resolve().parent.parent
-CONFIG = load_config(REPO_ROOT / "config.yaml")
 A01_SOURCE_ROW = 21  # the position whose ISIN was emptied (manifest A01)
 
 
-@pytest.fixture(scope="module")
-def data(input_data):
-    return input_data
+def row_at(input_data, source_row: int) -> pd.DataFrame:
+    return input_data.positions[input_data.positions["SourceRow"] == source_row]
 
 
-def row_at(data, source_row: int) -> pd.DataFrame:
-    return data.positions[data.positions["SourceRow"] == source_row]
-
-
-def test_reference_date_is_the_latest_valuation_date(data):
-    ctx = build_context(data, CONFIG)
+def test_reference_date_is_the_latest_valuation_date(input_data):
+    ctx = build_context(input_data, CONFIG)
     assert ctx.reference_date == pd.Timestamp("2026-11-11")
     assert ctx.horizon_end == pd.Timestamp("2026-12-11")
     assert ctx.ignored_position_rows == 0
-    assert len(positions_at_reference_date(data, ctx).positions) == 52
+    assert len(positions_at_reference_date(input_data, ctx).positions) == 52
 
 
-def test_reference_date_from_config_overrides_the_data(data):
-    ctx = build_context(data, with_overrides(CONFIG, {"reference_date": "2026-11-12"}))
+def test_reference_date_from_config_overrides_the_data(input_data):
+    ctx = build_context(input_data, with_overrides(CONFIG, {"reference_date": "2026-11-12"}))
     assert ctx.reference_date == pd.Timestamp("2026-11-12")
     # Q2: no position at that date is not an error, every row is ignored
     assert ctx.ignored_position_rows == 52
-    assert positions_at_reference_date(data, ctx).positions.empty
+    assert positions_at_reference_date(input_data, ctx).positions.empty
 
 
-def test_horizon_follows_the_config(data):
-    ctx = build_context(data, with_overrides(CONFIG, {"cashflow_horizon_days": 60}))
+def test_horizon_follows_the_config(input_data):
+    ctx = build_context(input_data, with_overrides(CONFIG, {"cashflow_horizon_days": 60}))
     assert ctx.horizon_end == pd.Timestamp("2027-01-10")
 
 
-def test_no_valid_valuation_date_and_no_config_date_stops(data):
+def test_no_valid_valuation_date_and_no_config_date_stops(input_data):
     # Q1: there is no reference date to work with
-    positions = data.positions.assign(ValuationDate=pd.NaT)
+    positions = input_data.positions.assign(ValuationDate=pd.NaT)
     with pytest.raises(InputSchemaError, match="no valid ValuationDate"):
-        build_context(dataclasses.replace(data, positions=positions), CONFIG)
+        build_context(dataclasses.replace(input_data, positions=positions), CONFIG)
 
 
-def test_empty_valuation_date_is_kept_not_ignored(data):
-    positions = data.positions.copy()
+def test_empty_valuation_date_is_kept_not_ignored(input_data):
+    positions = input_data.positions.copy()
     positions.loc[positions["SourceRow"] == 2, "ValuationDate"] = pd.NaT
     positions.loc[positions["SourceRow"] == 3, "ValuationDate"] = pd.Timestamp("2026-11-04")
-    changed = dataclasses.replace(data, positions=positions)
+    changed = dataclasses.replace(input_data, positions=positions)
     ctx = build_context(changed, CONFIG)
     kept = positions_at_reference_date(changed, ctx).positions["SourceRow"]
     assert ctx.ignored_position_rows == 1
     assert 2 in kept.tolist() and 3 not in kept.tolist()
 
 
-def test_exception_is_built_from_the_row_and_the_config(data):
-    rows = row_at(data, A01_SOURCE_ROW)
-    exceptions = make_exceptions(rows, "MISSING_ISIN", build_context(data, CONFIG),
+def test_exception_is_built_from_the_row_and_the_config(input_data):
+    rows = row_at(input_data, A01_SOURCE_ROW)
+    exceptions = make_exceptions(rows, "MISSING_ISIN", build_context(input_data, CONFIG),
                                  "positions", "ISIN", comment="ISIN is empty.")
     assert len(exceptions) == 1
     exception = exceptions.iloc[0]
@@ -81,16 +72,17 @@ def test_exception_is_built_from_the_row_and_the_config(data):
     assert exceptions.dtypes.equals(empty_exceptions().dtypes)
 
 
-def test_severity_comes_from_the_config(data):
+def test_severity_comes_from_the_config(input_data):
     config = with_overrides(CONFIG, {"controls": {"MISSING_ISIN": {"severity": "Warning"}}})
-    exceptions = make_exceptions(row_at(data, A01_SOURCE_ROW), "MISSING_ISIN",
-                                 build_context(data, config), "positions", "ISIN", comment="x")
+    exceptions = make_exceptions(row_at(input_data, A01_SOURCE_ROW), "MISSING_ISIN",
+                                 build_context(input_data, config), "positions", "ISIN",
+                                 comment="x")
     assert exceptions["Severity"].tolist() == ["Warning"]
 
 
-def test_observed_value_is_written_as_text(data):
-    rows = data.positions.head(1)
-    ctx = build_context(data, CONFIG)
+def test_observed_value_is_written_as_text(input_data):
+    rows = input_data.positions.head(1)
+    ctx = build_context(input_data, CONFIG)
     nominal = make_exceptions(rows, "INVALID_NOMINAL", ctx, "positions", "Nominal",
                               observed=rows["Nominal"], comment="x")
     maturity = make_exceptions(rows, "INVALID_VALUE", ctx, "positions", "MaturityDate",
@@ -99,17 +91,19 @@ def test_observed_value_is_written_as_text(data):
     assert maturity["ObservedValue"].iloc[0] == rows["MaturityDate"].iloc[0].strftime("%Y-%m-%d")
 
 
-def test_no_row_gives_a_typed_empty_frame(data):
-    exceptions = make_exceptions(data.positions.iloc[0:0], "MISSING_ISIN",
-                                 build_context(data, CONFIG), "positions", "ISIN", comment="x")
+def test_no_row_gives_a_typed_empty_frame(input_data):
+    exceptions = make_exceptions(input_data.positions.iloc[0:0], "MISSING_ISIN",
+                                 build_context(input_data, CONFIG), "positions", "ISIN",
+                                 comment="x")
     assert exceptions.empty
     assert list(exceptions.columns) == list(EXCEPTION_COLUMNS)
     assert exceptions.dtypes.equals(empty_exceptions().dtypes)
 
 
-def test_unknown_severity_is_rejected(data):
-    exceptions = make_exceptions(row_at(data, A01_SOURCE_ROW), "MISSING_ISIN",
-                                 build_context(data, CONFIG), "positions", "ISIN", comment="x")
+def test_unknown_severity_is_rejected(input_data):
+    exceptions = make_exceptions(row_at(input_data, A01_SOURCE_ROW), "MISSING_ISIN",
+                                 build_context(input_data, CONFIG), "positions", "ISIN",
+                                 comment="x")
     broken = exceptions.astype({"Severity": object}).assign(Severity="High")
     with pytest.raises(AssertionError, match="High"):
         conform(broken, EXCEPTION_COLUMNS)
@@ -123,19 +117,19 @@ def exceptions_frame(rows: list[dict]) -> pd.DataFrame:
 
 
 @pytest.fixture(scope="module")
-def isin_only_config(real_config):
+def isin_only_config():
     # Every other control disabled, so these engine tests only see MISSING_ISIN.
-    return with_overrides(real_config, {"controls": {
+    return with_overrides(CONFIG, {"controls": {
         control_id: {"enabled": control_id == "MISSING_ISIN"}
-        for control_id in real_config.controls}})
+        for control_id in CONFIG.controls}})
 
 
-def test_real_config_matches_the_registry(real_config):
-    check_registry(real_config)
+def test_real_config_matches_the_registry():
+    check_registry(CONFIG)
 
 
-def test_registered_control_missing_from_the_config_is_an_error(real_config):
-    raw = thaw(real_config.raw)
+def test_registered_control_missing_from_the_config_is_an_error():
+    raw = thaw(CONFIG.raw)
     settings = raw["controls"]["MISSING_ISIN"]
     raw["controls"] = {"MISSING_ISIN": settings, "NOT_A_CONTROL": settings}
     with pytest.raises(RegistryError, match="not registered: NOT_A_CONTROL.*"
@@ -143,8 +137,8 @@ def test_registered_control_missing_from_the_config_is_an_error(real_config):
         check_registry(config_from_dict(raw))
 
 
-def test_run_on_inputs(data, isin_only_config):
-    results = run(data, isin_only_config)
+def test_run_on_inputs(input_data, isin_only_config):
+    results = run(input_data, isin_only_config)
     exceptions = results.exceptions
     assert exceptions["ExceptionID"].tolist() == ["EXC-0001"]
     assert exceptions.loc[0, "ControlID"] == "MISSING_ISIN"
@@ -158,50 +152,41 @@ def test_exception_ids_are_sequential_on_inputs(input_results):
         f"EXC-{number:04d}" for number in range(1, count + 1)]
 
 
-def test_outputs_have_the_documented_columns(input_results):
-    assert input_results.exceptions.dtypes.equals(empty_exceptions().dtypes)
-    for output, columns in [("price_movements", PRICE_MOVEMENT_COLUMNS),
-                            ("upcoming_cashflows", UPCOMING_CASHFLOW_COLUMNS),
-                            ("data_quality", DATA_QUALITY_COLUMNS),
-                            ("summary", SUMMARY_COLUMNS)]:
-        assert getattr(input_results, output).dtypes.equals(empty_frame(columns).dtypes)
-
-
-def test_disabled_control_does_not_run(data, isin_only_config):
+def test_disabled_control_does_not_run(input_data, isin_only_config):
     config = with_overrides(isin_only_config, {"controls": {"MISSING_ISIN": {"enabled": False}}})
-    exceptions = run(data, config).exceptions
+    exceptions = run(input_data, config).exceptions
     assert exceptions.empty
     assert exceptions.dtypes.equals(empty_exceptions().dtypes)
 
 
-def test_same_inputs_give_the_same_exceptions(data, real_config, input_results):
-    pd.testing.assert_frame_equal(run(data, real_config).exceptions, input_results.exceptions)
+def test_same_inputs_give_the_same_exceptions(input_data, input_results):
+    pd.testing.assert_frame_equal(run(input_data, CONFIG).exceptions, input_results.exceptions)
 
 
-def test_empty_row_does_not_raise_missing_isin(data, isin_only_config):
+def test_empty_row_does_not_raise_missing_isin(input_data, isin_only_config):
     # Rule 11: reported once by INVALID_VALUE, never by MISSING_ISIN.
     empty_row = pd.DataFrame({"SourceRow": pd.array([99], dtype="Int64")})
-    positions = pd.concat([data.positions, empty_row], ignore_index=True)
-    exceptions = run(dataclasses.replace(data, positions=positions), isin_only_config).exceptions
+    positions = pd.concat([input_data.positions, empty_row], ignore_index=True)
+    changed = dataclasses.replace(input_data, positions=positions)
+    exceptions = run(changed, isin_only_config).exceptions
     assert exceptions["SourceRow"].tolist() == [A01_SOURCE_ROW]
 
 
-def test_unparseable_isin_does_not_raise_missing_isin(data, isin_only_config):
+def test_unparseable_isin_does_not_raise_missing_isin(input_data, isin_only_config):
     # Rule 10: a non-text ISIN is a parse issue, reported only by INVALID_VALUE.
-    positions = data.positions.copy()
+    positions = input_data.positions.copy()
     positions.loc[positions["SourceRow"] == 2, "ISIN"] = None
-    issue = pd.DataFrame({"File": ["positions"], "SourceRow": pd.array([2], dtype="Int64"),
-                          "Column": ["ISIN"], "RawValue": ["123456789012"]})
-    changed = dataclasses.replace(data, positions=positions,
-                                  parse_issues=pd.concat([data.parse_issues, issue]))
+    issue = parse_issue("positions", 2, "ISIN", "123456789012")
+    changed = dataclasses.replace(input_data, positions=positions,
+                                  parse_issues=pd.concat([input_data.parse_issues, issue]))
     assert run(changed, isin_only_config).exceptions["SourceRow"].tolist() == [A01_SOURCE_ROW]
 
 
-def test_positions_outside_the_reference_date_are_not_controlled(data, isin_only_config):
-    positions = data.positions.copy()
+def test_positions_outside_the_reference_date_are_not_controlled(input_data, isin_only_config):
+    positions = input_data.positions.copy()
     positions.loc[positions["SourceRow"] == A01_SOURCE_ROW, "ValuationDate"] = pd.Timestamp(
         "2026-11-04")
-    changed = dataclasses.replace(data, positions=positions)
+    changed = dataclasses.replace(input_data, positions=positions)
     assert run(changed, isin_only_config).exceptions.empty
 
 

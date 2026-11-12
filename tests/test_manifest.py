@@ -1,10 +1,10 @@
 from collections import Counter
-from pathlib import Path
 
 import pandas as pd
 import pytest
 
-MANIFEST_PATH = Path(__file__).resolve().parent.parent / "docs" / "anomaly_manifest.xlsx"
+from helpers import MANIFEST_PATH
+
 EXPECTED_TOTAL = 15  # one exception per injected anomaly
 
 # N03 and N04 list several portfolios: they have their own tests below.

@@ -8,9 +8,12 @@ from dq.engine import run
 from dq.loaders import InputData
 from dq.schema import PARSE_ISSUE_COLUMNS, empty_frame
 
-# Small hand-built inputs for the unit tests, with the loader's columns and dtypes.
+REPO_ROOT = Path(__file__).resolve().parent.parent
+CONFIG_PATH = REPO_ROOT / "config.yaml"
+MANIFEST_PATH = REPO_ROOT / "docs" / "anomaly_manifest.xlsx"
+CONFIG = load_config(CONFIG_PATH)
 
-CONFIG = load_config(Path(__file__).resolve().parent.parent / "config.yaml")
+# Small hand-built inputs for the unit tests, with the loader's columns and dtypes.
 
 POSITION = {
     "ValuationDate": "2026-11-11", "Portfolio": "CLO_EURO_01", "ISIN": "SYN000000001",
@@ -65,7 +68,8 @@ def parse_issue(file: str, source_row: int, column: str, raw: str) -> pd.DataFra
                          "Column": [column], "RawValue": [raw]})
 
 
-EMPTY_POSITION = {column: None for column in POSITION}
+def empty_row(file: str) -> dict:
+    return {column: None for column in COLUMN_TYPES[file]}
 
 
 def price(**changes) -> dict:

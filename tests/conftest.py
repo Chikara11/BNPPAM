@@ -3,43 +3,36 @@ from pathlib import Path
 import pandas as pd
 import pytest
 
-from dq.config import load_config
 from dq.engine import run
 from dq.loaders import load_inputs
+from helpers import CONFIG, MANIFEST_PATH, REPO_ROOT
 
-REPO_ROOT = Path(__file__).resolve().parent.parent
 
-
-def load_folder(folder: Path, config):
+def load_folder(folder: Path):
     return load_inputs(folder / "positions.xlsx", folder / "previous_prices.xlsx",
-                       folder / "cashflows.xlsx", config)
+                       folder / "cashflows.xlsx", CONFIG)
 
 
 @pytest.fixture(scope="session")
-def real_config():
-    return load_config(REPO_ROOT / "config.yaml")
+def clean_data():
+    return load_folder(REPO_ROOT / "data" / "clean")
 
 
 @pytest.fixture(scope="session")
-def clean_data(real_config):
-    return load_folder(REPO_ROOT / "data" / "clean", real_config)
-
-
-@pytest.fixture(scope="session")
-def input_data(real_config):
-    return load_folder(REPO_ROOT / "data" / "inputs", real_config)
+def input_data():
+    return load_folder(REPO_ROOT / "data" / "inputs")
 
 
 @pytest.fixture(scope="session")
 def manifest():
-    return pd.read_excel(REPO_ROOT / "docs" / "anomaly_manifest.xlsx", dtype=object)
+    return pd.read_excel(MANIFEST_PATH, dtype=object)
 
 
 @pytest.fixture(scope="session")
-def clean_results(clean_data, real_config):
-    return run(clean_data, real_config)
+def clean_results(clean_data):
+    return run(clean_data, CONFIG)
 
 
 @pytest.fixture(scope="session")
-def input_results(input_data, real_config):
-    return run(input_data, real_config)
+def input_results(input_data):
+    return run(input_data, CONFIG)

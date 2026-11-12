@@ -42,25 +42,25 @@ def test_clo_equity_alerts_just_above_15_percent(market_price):
     assert len(price_alerts("CLO Equity", 80.0, market_price)) == 1
 
 
-def test_raising_the_clo_debt_threshold_to_8_percent_silences_a06(input_data, real_config):
-    config = with_overrides(real_config, {"price_move_thresholds_pct": {"CLO Debt": 8.0}})
+def test_raising_the_clo_debt_threshold_to_8_percent_silences_a06(input_data):
+    config = with_overrides(CONFIG, {"price_move_thresholds_pct": {"CLO Debt": 8.0}})
     moves = run(input_data, config).exceptions
     moves = moves[moves["ControlID"] == "PRICE_MOVE_ABOVE_THRESHOLD"]
     assert "SYN000000004" not in moves["ISIN"].tolist()  # A06: -7.14 % on CLO Debt
     assert sorted(moves["ISIN"]) == ["SYN000000025", "SYN000000033"]  # A08 and A07 still fire
 
 
-def test_lowering_a_threshold_adds_alerts(input_data, real_config):
-    default = run(input_data, real_config).exceptions
-    lowered = run(input_data, with_overrides(real_config, {"price_move_thresholds_pct": {
+def test_lowering_a_threshold_adds_alerts(input_data):
+    default = run(input_data, CONFIG).exceptions
+    lowered = run(input_data, with_overrides(CONFIG, {"price_move_thresholds_pct": {
         "CLO Equity": 12.0}})).exceptions
     def count(exceptions):
         return (exceptions["ControlID"] == "PRICE_MOVE_ABOVE_THRESHOLD").sum()
     assert count(lowered) == count(default) + 1  # N01: -12.5 % on CLO Equity
 
 
-def test_disabled_price_control_raises_nothing(input_data, real_config):
-    config = with_overrides(real_config, {"controls": {
+def test_disabled_price_control_raises_nothing(input_data):
+    config = with_overrides(CONFIG, {"controls": {
         "PRICE_MOVE_ABOVE_THRESHOLD": {"enabled": False}}})
     exceptions = run(input_data, config).exceptions
     assert not (exceptions["ControlID"] == "PRICE_MOVE_ABOVE_THRESHOLD").any()

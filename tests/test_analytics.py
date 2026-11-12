@@ -177,12 +177,12 @@ def test_summary_counts_exceptions_by_severity(input_results):
             for severity in ("Critical", "Warning", "Information")] == [6, 7, 2]
 
 
-def test_summary_lists_every_enabled_control_and_portfolio(input_results, real_config):
+def test_summary_lists_every_enabled_control_and_portfolio(input_results):
     summary = input_results.summary
     controls = summary.loc[summary["Section"] == "Exceptions by control", "Item"].tolist()
-    assert controls == list(real_config.controls)
+    assert controls == list(CONFIG.controls)
     portfolios = summary.loc[summary["Section"] == "Exceptions by portfolio", "Item"].tolist()
-    assert portfolios == list(real_config.allowed_values["Portfolio"]) + ["(none)"]
+    assert portfolios == list(CONFIG.allowed_values["Portfolio"]) + ["(none)"]
     by_portfolio = summary.loc[summary["Section"] == "Exceptions by portfolio", "Value"].sum()
     assert by_portfolio == len(input_results.exceptions)
 
@@ -199,10 +199,10 @@ def test_no_amount_is_summed_across_currencies(input_results):
                              currency) == pytest.approx(total)
 
 
-def test_summary_shows_the_ignored_position_rows(input_data, real_config, input_results):
+def test_summary_shows_the_ignored_position_rows(input_data, input_results):
     item = "Position rows not at the reference date (ignored)"
     assert summary_value(input_results, "Overview", item) == 0
-    later = run(input_data, with_overrides(real_config, {"reference_date": "2026-11-12"}))
+    later = run(input_data, with_overrides(CONFIG, {"reference_date": "2026-11-12"}))
     assert summary_value(later, "Overview", item) == 52
     assert summary_value(later, "Overview", "Positions") == 0
 
