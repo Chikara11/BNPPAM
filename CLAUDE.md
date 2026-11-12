@@ -93,6 +93,27 @@ Do not classify a missing previous price as a missing current market price.
 Do not compute a price movement when the current or previous price is
 missing or non-positive (already reported by another rule).
 
+## Exception rules (one anomaly = one exception)
+The anomaly manifest expects exactly one exception per injected anomaly.
+The engine follows these rules:
+1. A position without ISIN raises only MISSING_ISIN: no other ISIN-based
+   control (price history, price movement, duplicate key) runs on that row.
+2. MISSING_VALUE and INVALID_VALUE only cover fields without a dedicated
+   control (ISIN, MarketPrice, Rating, Nominal and prices have their own).
+3. An empty price or nominal is missing, not invalid: INVALID_PRICE and
+   INVALID_NOMINAL apply only to a value that is present and <= 0.
+4. Cashflow matching checks that Portfolio + ISIN exists in the positions;
+   it never joins row by row, so a duplicated position does not duplicate
+   cashflows. Reports state that a duplicated position is counted twice
+   in totals.
+5. Duplicates (positions, cashflows) raise one exception per duplicated
+   key, not one per row.
+6. CURRENCY_MISMATCH is checked only on cashflows that match a position.
+7. PriceChangePct = (MarketPrice - PreviousPrice) / PreviousPrice * 100,
+   in this order, rounded to 6 decimals before the comparison with the
+   threshold (so that exactly 5 % never triggers through a floating-point
+   residue). No movement is computed when either price is missing or <= 0.
+
 ## Severity (defaults, configurable)
 Critical:
 - Missing ISIN.
