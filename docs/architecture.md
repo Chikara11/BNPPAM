@@ -120,7 +120,10 @@ config.yaml ──► config.load_config() ──► Config ────┤
   Parameters sheet.
 - Validates on load: every control has `enabled`, `severity`, `label`;
   severities are Critical / Warning / Information; thresholds exist for each
-  asset type. Stops with a clear `ConfigError` otherwise.
+  asset type; every required column has a type in `COLUMN_TYPES` (the
+  column types of `docs/data_spec.md`, defined in `config.py` and used by
+  the loader), so a new required column can never skip type checking.
+  Stops with a clear `ConfigError` otherwise.
 - `with_overrides(config, overrides: dict) -> Config` deep-merges the nested
   dict `overrides` (e.g. `{"price_move_thresholds_pct": {"ABS": 4.0}}`) into a
   deep copy of the raw config, re-validates it and returns a new `Config`
@@ -223,7 +226,10 @@ Rules for a control:
 - returns one row per exception, following the exception rules of
   `CLAUDE.md`;
 - does not know about other controls; overlap is prevented by the rules,
-  not by checking what another control returned.
+  not by checking what another control returned;
+- identifies rows by `SourceRow`, never by the DataFrame index: the engine
+  filters positions without renumbering them, so the index is not a row
+  number. The same applies to analytics, the report and the app.
 
 Placement:
 - `controls/common.py`: MISSING_VALUE, INVALID_VALUE, INVALID_PRICE;

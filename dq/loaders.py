@@ -11,26 +11,7 @@ import numpy as np
 import pandas as pd
 from openpyxl.utils.exceptions import InvalidFileException
 
-from dq.config import INPUT_FILES, Config
-
-# Column types of docs/data_spec.md. Columns not listed here are kept as read.
-COLUMN_TYPES = {
-    "positions": {
-        "ValuationDate": "date", "Portfolio": "text", "ISIN": "text",
-        "SecurityName": "text", "AssetType": "text", "Currency": "text",
-        "Nominal": "number", "BookPrice": "number", "MarketPrice": "number",
-        "Rating": "text", "MaturityDate": "date",
-    },
-    "previous_prices": {
-        "ISIN": "text", "PreviousDate": "date", "PreviousPrice": "number",
-        "PriceSource": "text",
-    },
-    "cashflows": {
-        "Portfolio": "text", "ISIN": "text", "CashflowDate": "date",
-        "CashflowType": "text", "Currency": "text", "Amount": "number",
-        "Status": "text",
-    },
-}
+from dq.config import COLUMN_TYPES, INPUT_FILES, Config
 
 # docs/output_spec.md section 0
 PARSE_ISSUE_COLUMNS = {"File": "object", "SourceRow": "Int64", "Column": "object",

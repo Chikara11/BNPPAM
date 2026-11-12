@@ -1,4 +1,5 @@
 import datetime
+import importlib.util
 import io
 from pathlib import Path
 
@@ -7,8 +8,8 @@ import pandas as pd
 import pytest
 
 from dq.config import load_config
-from dq.loaders import (InputSchemaError, PARSE_ISSUE_COLUMNS, empty_rows, load_inputs,
-                        truly_missing)
+from dq.loaders import (COLUMN_TYPES, InputSchemaError, PARSE_ISSUE_COLUMNS, empty_rows,
+                        load_inputs, truly_missing)
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 CONFIG = load_config(REPO_ROOT / "config.yaml")
@@ -61,6 +62,16 @@ def load(paths: dict):
 
 def position(**changes) -> dict:
     return {**VALID_ROWS["positions"], **changes}
+
+
+def test_column_types_match_the_generator():
+    # The engine may not import scripts/, so the table is duplicated there.
+    # This test makes any drift between the two copies fail.
+    path = REPO_ROOT / "scripts" / "generate_clean_data.py"
+    spec = importlib.util.spec_from_file_location("generate_clean_data", path)
+    generator = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(generator)
+    assert COLUMN_TYPES == generator.COLUMN_TYPES
 
 
 def test_input_files_load_with_the_documented_dtypes():

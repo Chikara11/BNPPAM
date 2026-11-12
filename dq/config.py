@@ -14,6 +14,27 @@ import yaml
 SEVERITIES = ("Critical", "Warning", "Information")
 INPUT_FILES = ("positions", "previous_prices", "cashflows")
 
+# Column types of docs/data_spec.md, used by the loader. It lives here so that
+# the config can check that every required column has a type. Columns not
+# listed here are kept as read.
+COLUMN_TYPES = {
+    "positions": {
+        "ValuationDate": "date", "Portfolio": "text", "ISIN": "text",
+        "SecurityName": "text", "AssetType": "text", "Currency": "text",
+        "Nominal": "number", "BookPrice": "number", "MarketPrice": "number",
+        "Rating": "text", "MaturityDate": "date",
+    },
+    "previous_prices": {
+        "ISIN": "text", "PreviousDate": "date", "PreviousPrice": "number",
+        "PriceSource": "text",
+    },
+    "cashflows": {
+        "Portfolio": "text", "ISIN": "text", "CashflowDate": "date",
+        "CashflowType": "text", "Currency": "text", "Amount": "number",
+        "Status": "text",
+    },
+}
+
 TOP_LEVEL_KEYS = (
     "reference_date", "cashflow_horizon_days", "price_move_thresholds_pct",
     "rating_required_for", "allowed_values", "required_columns", "keys", "controls",
@@ -166,8 +187,17 @@ def check_required_columns(raw: dict) -> list[str]:
     required = raw["required_columns"]
     if not isinstance(required, Mapping):
         return ["required_columns must be a mapping of file -> list of columns."]
-    return [f"required_columns.{file} must be a non-empty list of column names."
-            for file in INPUT_FILES if not is_text_list(required.get(file))]
+    problems = []
+    for file in INPUT_FILES:
+        columns = required.get(file)
+        if not is_text_list(columns):
+            problems.append(f"required_columns.{file} must be a non-empty list of column names.")
+            continue
+        # a required column without a type would skip type checking in the loader
+        problems += [f"required_columns.{file}: column {column} has no type in COLUMN_TYPES "
+                     f"(dq/config.py, docs/data_spec.md)."
+                     for column in columns if column not in COLUMN_TYPES[file]]
+    return problems
 
 
 def check_keys(raw: dict) -> list[str]:

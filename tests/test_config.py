@@ -132,6 +132,10 @@ def break_missing_required_file(raw):
     del raw["required_columns"]["cashflows"]
 
 
+def break_required_column_without_type(raw):
+    raw["required_columns"]["positions"].append("Seniority")
+
+
 @pytest.mark.parametrize("breaker, named", [
     (break_missing_severity, "controls.MISSING_RATING.severity"),
     (break_unknown_severity, "controls.MISSING_ISIN.severity"),
@@ -145,6 +149,7 @@ def break_missing_required_file(raw):
     (break_reference_date, "reference_date"),
     (break_missing_top_level, "keys"),
     (break_missing_required_file, "required_columns.cashflows"),
+    (break_required_column_without_type, "Seniority has no type"),
 ])
 def test_invalid_config_raises_a_clear_error(raw, breaker, named):
     breaker(raw)
