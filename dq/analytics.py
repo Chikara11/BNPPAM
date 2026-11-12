@@ -8,23 +8,18 @@ import pandas as pd
 from dq.config import COLUMN_TYPES, INPUT_FILES, SEVERITIES
 from dq.context import Context
 from dq.loaders import InputData, empty_rows, parse_issues_of, truly_missing
-from dq.schema import (DATA_QUALITY_COLUMNS, PRICE_MOVEMENT_COLUMNS, SUMMARY_COLUMNS,
+from dq.schema import (COMPUTED, CONFLICTING_PRICES, DATA_QUALITY_COLUMNS, INVALID_ISIN,
+                       INVALID_MARKET_PRICE, INVALID_PREVIOUS_PRICE, MISSING_ISIN,
+                       MISSING_MARKET_PRICE, MISSING_PREVIOUS_PRICE, NO_PORTFOLIO,
+                       NO_PRICE_HISTORY, NO_USABLE_PRICE, PRICE_MOVEMENT_COLUMNS,
+                       SECTION_BY_CONTROL, SECTION_BY_PORTFOLIO, SECTION_BY_SEVERITY,
+                       SECTION_MARKET_VALUE, SECTION_OVERVIEW, SECTION_PRICE_MOVES,
+                       SECTION_UPCOMING_CASHFLOWS, STATUS_PAID, SUMMARY_COLUMNS,
                        UPCOMING_CASHFLOW_COLUMNS, conform)
 
-# MoveStatus vocabulary of output_spec.md section 2
-COMPUTED = "Computed"
-MISSING_ISIN = "Missing ISIN"
-INVALID_ISIN = "Invalid ISIN"
-NO_PRICE_HISTORY = "No price history"
-MISSING_MARKET_PRICE = "Missing market price"
-INVALID_MARKET_PRICE = "Invalid market price"
-MISSING_PREVIOUS_PRICE = "Missing previous price"
-INVALID_PREVIOUS_PRICE = "Invalid previous price"
-CONFLICTING_PRICES = "Conflicting previous prices"
-NO_USABLE_PRICE = "No usable previous price"
-USABLE = "Usable"  # previous price found, not yet checked for > 0
-
-NO_PORTFOLIO = "(none)"
+# Internal only, never in an output: a previous price was found but is not
+# yet checked for > 0.
+USABLE = "Usable"
 
 DUPLICATE_KEYS = {"positions": "position_unique", "previous_prices": "previous_price_unique",
                   "cashflows": "cashflow_unique"}
@@ -102,38 +97,38 @@ def summary(exceptions: pd.DataFrame, data: InputData, ctx: Context) -> pd.DataF
         rows.append({"Section": section, "Item": item, "Currency": currency,
                      "Value": float(value), "Unit": unit})
 
-    add("Overview", "Positions", len(moves))
-    add("Overview", "Portfolios", moves["Portfolio"].dropna().nunique())
-    add("Overview", "Distinct ISINs", moves["ISIN"].dropna().nunique())
+    add(SECTION_OVERVIEW, "Positions", len(moves))
+    add(SECTION_OVERVIEW, "Portfolios", moves["Portfolio"].dropna().nunique())
+    add(SECTION_OVERVIEW, "Distinct ISINs", moves["ISIN"].dropna().nunique())
     # Duplicates stay in the totals (never repaired), so they are shown here.
-    add("Overview", "Duplicated position rows (counted twice in totals)",
+    add(SECTION_OVERVIEW, "Duplicated position rows (counted twice in totals)",
         (~first_occurrence(data, "positions", ctx)).sum())
-    add("Overview", "Position rows not at the reference date (ignored)",
+    add(SECTION_OVERVIEW, "Position rows not at the reference date (ignored)",
         ctx.ignored_position_rows)
-    add("Overview", "Cashflows in the horizon", len(upcoming))
-    add("Overview", "Duplicated cashflow rows in the horizon",
+    add(SECTION_OVERVIEW, "Cashflows in the horizon", len(upcoming))
+    add(SECTION_OVERVIEW, "Duplicated cashflow rows in the horizon",
         (~first_occurrence(data, "cashflows", ctx) & in_horizon(data, ctx)).sum())
 
     for severity in SEVERITIES:
-        add("Exceptions by severity", severity, (exceptions["Severity"] == severity).sum())
+        add(SECTION_BY_SEVERITY, severity, (exceptions["Severity"] == severity).sum())
     for control_id, settings in ctx.config.controls.items():
         if settings.enabled:
-            add("Exceptions by control", control_id, (exceptions["ControlID"] == control_id).sum())
+            add(SECTION_BY_CONTROL, control_id, (exceptions["ControlID"] == control_id).sum())
     for portfolio in portfolios_to_report(exceptions, ctx):
         found = (exceptions["Portfolio"].isna() if portfolio == NO_PORTFOLIO
                  else exceptions["Portfolio"] == portfolio)
-        add("Exceptions by portfolio", portfolio, found.sum())
+        add(SECTION_BY_PORTFOLIO, portfolio, found.sum())
 
     # Amounts are totalled per currency only: never summed across currencies.
     for currency, total in totals_by_currency(moves, "MarketValue", ctx):
-        add("Market value by currency", "Market value", total, "amount", currency)
+        add(SECTION_MARKET_VALUE, "Market value", total, "amount", currency)
     for currency, total in totals_by_currency(upcoming, "Amount", ctx):
-        add("Upcoming cashflows by currency", "Upcoming cashflows", total, "amount", currency)
+        add(SECTION_UPCOMING_CASHFLOWS, "Upcoming cashflows", total, "amount", currency)
 
     computed = int((moves["MoveStatus"] == COMPUTED).sum())
-    add("Price moves", "Computed", computed)
-    add("Price moves", "Breaches", moves["Breach"].fillna(False).sum())
-    add("Price moves", "Not computable", len(moves) - computed)
+    add(SECTION_PRICE_MOVES, "Computed", computed)
+    add(SECTION_PRICE_MOVES, "Breaches", moves["Breach"].fillna(False).sum())
+    add(SECTION_PRICE_MOVES, "Not computable", len(moves) - computed)
     return conform(pd.DataFrame(rows, columns=list(SUMMARY_COLUMNS)), SUMMARY_COLUMNS)
 
 
@@ -266,7 +261,7 @@ def in_horizon(data: InputData, ctx: Context) -> pd.Series:
     dates = cashflows["CashflowDate"]
     return (~empty_rows(data, "cashflows") & dates.notna()
             & (dates >= ctx.reference_date) & (dates <= ctx.horizon_end)
-            & (cashflows["Status"] != "Paid"))
+            & (cashflows["Status"] != STATUS_PAID))
 
 
 def matching_positions(data: InputData, ctx: Context) -> pd.DataFrame:

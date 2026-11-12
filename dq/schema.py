@@ -9,6 +9,32 @@ from dq.config import SEVERITIES
 
 SEVERITY_DTYPE = pd.CategoricalDtype(SEVERITIES, ordered=True)
 
+# Cashflow Status values with a business meaning (CLAUDE.md "Reference date").
+STATUS_PAID = "Paid"
+STATUS_FORECAST = "Forecast"
+
+# MoveStatus vocabulary of section 2, in priority order (first reason wins).
+MISSING_ISIN = "Missing ISIN"
+INVALID_ISIN = "Invalid ISIN"
+MISSING_MARKET_PRICE = "Missing market price"
+INVALID_MARKET_PRICE = "Invalid market price"
+NO_PRICE_HISTORY = "No price history"
+NO_USABLE_PRICE = "No usable previous price"
+CONFLICTING_PRICES = "Conflicting previous prices"
+MISSING_PREVIOUS_PRICE = "Missing previous price"
+INVALID_PREVIOUS_PRICE = "Invalid previous price"
+COMPUTED = "Computed"
+
+# Summary sections of section 5, in output order.
+SECTION_OVERVIEW = "Overview"
+SECTION_BY_SEVERITY = "Exceptions by severity"
+SECTION_BY_CONTROL = "Exceptions by control"
+SECTION_BY_PORTFOLIO = "Exceptions by portfolio"
+SECTION_MARKET_VALUE = "Market value by currency"
+SECTION_UPCOMING_CASHFLOWS = "Upcoming cashflows by currency"
+SECTION_PRICE_MOVES = "Price moves"
+NO_PORTFOLIO = "(none)"  # exceptions without a portfolio
+
 EXCEPTION_COLUMNS = {
     "ExceptionID": "object",
     "Severity": SEVERITY_DTYPE,

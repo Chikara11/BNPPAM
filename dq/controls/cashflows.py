@@ -8,6 +8,7 @@ from dq.context import Context
 from dq.controls.common import evaluated_rows
 from dq.exceptions import make_duplicate_exceptions, make_exceptions
 from dq.loaders import InputData
+from dq.schema import STATUS_FORECAST
 
 
 def check_unmatched_cashflow(data: InputData, ctx: Context) -> pd.DataFrame:
@@ -37,7 +38,7 @@ def check_past_forecast_cashflow(data: InputData, ctx: Context) -> pd.DataFrame:
     # "Past-dated" = strictly before the reference date. A Status outside the
     # allowed values (e.g. " Forecast") is reported by INVALID_VALUE only.
     cashflows = data.cashflows
-    past = (evaluated_rows(data, "cashflows", ctx) & (cashflows["Status"] == "Forecast")
+    past = (evaluated_rows(data, "cashflows", ctx) & (cashflows["Status"] == STATUS_FORECAST)
             & (cashflows["CashflowDate"] < ctx.reference_date))
     rows = with_security_name(data, cashflows[past], ctx)
     return make_exceptions(
