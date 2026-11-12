@@ -211,6 +211,58 @@ Information:
   dtypes).
 - Keep calculations and exception detection deterministic.
 - Readable code over clever code: short functions, explicit names, no unnecessary classes.
+## Code quality rules
+
+Readability
+- Code is written for a reviewer who has never seen it: clear names, no
+  abbreviations except domain terms (ISIN, VD, CLO, ABS).
+- One function = one job. If a function needs "and" to describe it, split it.
+  Target: under ~40 lines per function.
+- Type hints on every public function. A docstring only on the contract
+  functions named in docs/architecture.md (load_config, config_from_dict,
+  with_overrides, load_inputs, truly_missing, empty_rows, build_context,
+  positions_at_reference_date, make_exceptions, empty_exceptions, the
+  check_* controls, the analytics outputs, engine.run, report.write_report):
+  what it does, what it returns, which CLAUDE.md rule it applies.
+  Everywhere else: short comments that explain WHY.
+- Comments explain WHY (a business rule, a pandas pitfall), never WHAT the
+  next line does.
+
+No duplication
+- Every business formula (price change, market value, horizon, keys) exists
+  in exactly one place and is imported everywhere else.
+- No copy-pasted control logic: shared patterns (duplicates, matching,
+  first occurrence, valid ISIN) live in shared helpers.
+- No hard-coded threshold, severity, label, allowed value, key, column list
+  or pattern: they come from config.yaml or dq/schema.py.
+
+No bloat
+- No dead code, unused imports, unused parameters, commented-out code or
+  speculative features "for later".
+- No wrapper that only calls another function, no class where a function is
+  enough, no abstraction used only once unless it makes a rule explicit.
+- Prefer vectorised pandas over row loops; use a loop only when it is clearly
+  more readable and the data is small, and say why.
+
+Correctness and safety
+- Pure functions in the engine: no I/O, no global state, no mutation of
+  inputs (pandas copy-on-write; use .loc, never chained assignment).
+- Errors: raise the project's own exceptions (ConfigError, InputSchemaError,
+  RegistryError) with a message naming the file, column or control.
+  Never a bare except, never a silent pass.
+- Deterministic output: explicit sort keys, stable sorts, no reliance on
+  dict or set ordering for results.
+
+Tests
+- Every rule has a test that fails if the rule is removed. Test names say
+  the behaviour: test_<control>_<case>_<expected>.
+- Tests use small hand-built tables (tests/helpers.py) for unit cases and
+  the manifest for end-to-end cases. No test depends on another test.
+
+Before every commit
+- pytest -q -W error passes.
+- No new warning, no new dependency, no file outside the agreed layout.
+
 
 ## Testing
 - `docs/anomaly_manifest.xlsx` lists every injected anomaly and its expected

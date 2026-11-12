@@ -46,7 +46,7 @@ securitised-credit-dq/
 │   ├── __init__.py
 │   ├── config.py             # load and validate config.yaml
 │   ├── loaders.py            # read the 3 Excel files, convert types
-│   ├── schema.py             # output column names and dtypes
+│   ├── schema.py             # output column names, dtypes and vocabulary
 │   ├── context.py            # Context: config + reference date
 │   ├── exceptions.py         # build exception rows in the common format
 │   ├── controls/
@@ -65,11 +65,13 @@ securitised-credit-dq/
 │   └── run_report.py         # CLI: load -> run -> write report
 ├── tests/
 │   ├── conftest.py
+│   ├── helpers.py            # paths, config, small hand-built tables
 │   ├── test_config.py
 │   ├── test_loaders.py
 │   ├── test_engine.py
 │   ├── test_manifest.py
 │   ├── test_controls.py
+│   ├── test_analytics.py
 │   └── test_boundaries.py
 ├── data/clean/   data/inputs/
 ├── output/                   # generated reports (git-ignored)
@@ -77,9 +79,12 @@ securitised-credit-dq/
                               # anomaly_manifest.xlsx
 ```
 
-`app.py`, `scripts/` and the tests import `dq` directly (`import dq`): the
-repo root is on the path when running from it, and pytest gets it from
-`pythonpath = ["."]` in `pyproject.toml`.
+`app.py` and the tests import `dq` directly (`import dq`): `streamlit run
+app.py` puts the repo root on the path, and pytest gets it from
+`pythonpath = ["."]` in `pyproject.toml`. A script run as
+`python scripts/<name>.py` only has `scripts/` on its path and cannot import
+`dq`: the generator and the injector are standalone and read `config.yaml`
+themselves. **Open decision**: how `scripts/run_report.py` will import `dq`.
 
 ---
 
@@ -138,7 +143,7 @@ config.yaml ──► config.load_config() ──► Config ────┤
   `config` gives the required columns.
 - `InputData` is a frozen dataclass with three DataFrames and
   `parse_issues`, a DataFrame defined in `docs/output_spec.md` section 0
-  (File, SourceRow, Column, RawValue).
+  (File, SourceRow, Column, RawValue; `PARSE_ISSUE_COLUMNS` in `schema.py`).
 - Rules:
   - every column is first read as `object` (raw cell values), then
     converted: text columns stay `object` (forced explicitly; pandas 3 would
@@ -166,6 +171,8 @@ config.yaml ──► config.load_config() ──► Config ────┤
     data row = 2), so every exception points to a real row. Empty rows in
     the middle of a sheet are kept, so the numbering stays right.
 - Helpers used by the controls:
+  - `parse_issues_of(data, file, column) -> pd.DataFrame`: the parse issues
+    of one column;
   - `truly_missing(data, file, column) -> pd.Series` (bool): the cell is
     empty and has no parse issue (exception rule 10);
   - `empty_rows(data, file) -> pd.Series` (bool): every column of the row
@@ -199,7 +206,10 @@ config.yaml ──► config.load_config() ──► Config ────┤
   from `ctx.config`. `Source` is the input file of the row (`positions`,
   `previous_prices` or `cashflows`).
 - Multi-row exceptions (duplicates): `SourceRow` = first row; `Comment`
-  lists all the rows.
+  lists all the rows. Built by `make_duplicate_exceptions` (one exception
+  per duplicated key, rule 5).
+- `combine_exceptions(frames) -> pd.DataFrame` concatenates the exceptions
+  of several checks (empty frames skipped) in the common format.
 - Duplicates and unmatched cashflows: `Field` = the key columns joined with
   `+` (e.g. `ValuationDate+Portfolio+ISIN`).
 - Price movement exceptions are raised on the position row:
@@ -237,8 +247,11 @@ Placement:
   only), the row scope of every non-duplicate control. The lower-level row
   helpers live in `analytics.py`, which controls and analytics both use
   (analytics never imports the controls): `valid_isin` (rule 1),
-  `duplicate_candidates` / `first_occurrence` (rule 12), `held_isins` and
-  the cashflow-to-position matching;
+  `duplicate_candidates` / `first_occurrence` (rule 12), `held_isins`,
+  `matching_positions` (one position per Portfolio + ISIN: valid ISIN,
+  complete key, first occurrence of a duplicated position, rules 1, 4
+  and 12) and `position_values` (the value of a position column for each
+  cashflow: SecurityName, AssetType, MaturityDate, Currency);
 - `controls/cashflows.py`: UNMATCHED_CASHFLOW, CURRENCY_MISMATCH and the
   other cashflow controls (DUPLICATE_CASHFLOW, PAST_FORECAST_CASHFLOW);
 - `controls/prices.py`: price controls (PRICE_MOVE_ABOVE_THRESHOLD,
@@ -325,7 +338,7 @@ the price change formula and its rounding are those of `CLAUDE.md`.
 | Error | Raised by | Meaning |
 |---|---|---|
 | `ConfigError` | `config.py` | config.yaml incomplete or inconsistent |
-| `InputSchemaError` | `loaders.py` | missing column or unreadable file |
+| `InputSchemaError` | `loaders.py`, `context.py` | missing column, unreadable file, or no reference date |
 | `RegistryError` | `engine.py` | config and registry do not match |
 
 Bad **values** in the data never raise: they become exceptions.
@@ -352,15 +365,15 @@ Changing a threshold or a severity = edit `config.yaml` only.
 
 ## 7. Testing
 
-- `conftest.py` loads the config, `data/clean/` and `data/inputs/` once per
-  session. **Temporary**, until every control of `config.yaml` is
-  registered: the tests run on a config built from the real `config.yaml`
-  with only the registered controls, and one test checks that the real
-  config raises `RegistryError` naming the missing controls. Once the last
-  control is registered, conftest uses the real config and that test is
-  removed.
+- `helpers.py` holds the repo paths, the real config (`CONFIG`) and the
+  small hand-built tables of the unit tests (`make_data`, `position`,
+  `price`, `cashflow`, `empty_row`, `parse_issue`, `raised`).
+- `conftest.py` loads `data/clean/` and `data/inputs/` and runs the engine
+  on them once per session, with the real config.
 - `test_config.py`, `test_loaders.py`, `test_engine.py`: config validation
   and overrides, loader conversions and errors, registry / sort / IDs.
+- `test_analytics.py`: the non-exception outputs (price movements,
+  upcoming cashflows, data quality, summary) and their schemas.
 - `test_manifest.py`: the manifest is the oracle (exact control, severity
   and count per case; total on inputs; zero on clean data). An exception
   matches a case on ControlID + Portfolio + ISIN, ignoring the manifest
